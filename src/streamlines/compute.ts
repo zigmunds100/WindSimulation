@@ -46,24 +46,62 @@ export function velocity(x: number, y: number, z: number, params: SimParams): Ve
   let vy = coeff * 3 * x * y;
   let vz = coeff * 3 * x * z;
 
-  // Wake perturbation behind sphere
-  if (wakeEnabled && gamma > 0 && x > 0) {
-    const xi = x / R;
-    const rhoSq = (y * y + z * z) / (R * R);
-    const decay = Math.exp(-0.15 * xi);
-    const radialEnv = Math.exp(-0.5 * rhoSq);
-    const perturbation = gamma * decay * radialEnv;
-    const freq = Math.PI; // ~0.5 cycles per radius
-
-    // Axial perturbation
-    vx += perturbation * Math.sin(freq * xi) * 0.5;
-
-    // Radial perturbation (push outward from axis)
+  // Wake perturbation behind sphere — three components:
+  // 1) Recirculation bubble (reversed flow immediately behind)
+  // 2) Vortex ring shedding (periodic toroidal vortices)
+  // 3) Helical instability (swirl around wake axis)
+  if (wakeEnabled && gamma > 0 && x > R * 0.5) {
+    const xi = (x - R) / R; // distance behind sphere surface, in radii
     const rho = Math.sqrt(y * y + z * z);
-    if (rho > 0.001) {
-      const radialPert = perturbation * Math.cos(freq * xi) * 1.5;
-      vy += radialPert * (y / rho);
-      vz += radialPert * (z / rho);
+    const rhoN = rho / R; // normalized radial distance
+
+    // 1) Recirculation bubble: reversed flow in a narrow region behind sphere
+    if (xi < 2.5 && rhoN < 1.2) {
+      const axialEnv = Math.sin(Math.PI * xi / 2.5); // peaks at xi≈1.25
+      const radEnv = Math.exp(-2.0 * rhoN * rhoN);
+      const recirc = -gamma * U * 0.8 * axialEnv * radEnv;
+      vx += recirc;
+      // Recirculation pushes flow outward at the back
+      if (rho > 0.001) {
+        const outward = gamma * U * 0.3 * Math.cos(Math.PI * xi / 2.5) * radEnv;
+        vy += outward * (y / rho);
+        vz += outward * (z / rho);
+      }
+    }
+
+    // 2) Vortex ring shedding: periodic toroidal vortices convecting downstream
+    if (xi > 0.5) {
+      const shedFreq = 1.8; // Strouhal-like frequency
+      const phase = 2 * Math.PI * shedFreq * xi;
+      const ringDecay = Math.exp(-0.12 * xi); // slow decay downstream
+      const ringRadial = Math.exp(-0.8 * (rhoN - 1.0) * (rhoN - 1.0)); // peaks at rho≈R
+      const ringStrength = gamma * U * 0.6 * ringDecay * ringRadial;
+
+      // Toroidal rotation: alternating inward/outward + axial oscillation
+      vx += ringStrength * Math.cos(phase) * 0.4;
+      if (rho > 0.001) {
+        const radialRing = ringStrength * Math.sin(phase) * 0.8;
+        vy += radialRing * (y / rho);
+        vz += radialRing * (z / rho);
+      }
+    }
+
+    // 3) Helical instability: swirl around the wake axis
+    if (xi > 1.0 && rho > 0.001) {
+      const helixDecay = Math.exp(-0.1 * xi);
+      const helixEnv = Math.exp(-0.5 * rhoN * rhoN);
+      const helixPhase = 2 * Math.PI * 0.7 * xi; // slow spiral
+      const swirl = gamma * U * 0.35 * helixDecay * helixEnv;
+
+      // Tangential velocity (perpendicular to radial direction in yz plane)
+      const tanY = -z / rho; // tangent direction
+      const tanZ = y / rho;
+      vy += swirl * Math.sin(helixPhase) * tanY;
+      vz += swirl * Math.sin(helixPhase) * tanZ;
+
+      // Helical wobble of the wake centerline
+      vy += swirl * 0.3 * Math.cos(helixPhase);
+      vz += swirl * 0.3 * Math.sin(helixPhase);
     }
   }
 
