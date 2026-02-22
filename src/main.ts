@@ -1,6 +1,7 @@
 import './style.css';
 import { createScene } from './scene/createScene';
 import { createAxes } from './ui/axes';
+import { createEquations } from './ui/equations';
 import { createControls } from './ui/controls';
 import { DEFAULT_PARAMS } from './streamlines/compute';
 
@@ -50,8 +51,9 @@ async function main() {
 
   const scene = createScene(device, format, canvas);
 
-  // Create axes overlay
+  // Create axes overlay and equations
   createAxes();
+  createEquations();
 
   // Render helper
   function renderFrame(dt: number) {
