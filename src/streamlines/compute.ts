@@ -3,12 +3,15 @@
  * for 3D potential flow around a sphere.
  */
 
+export type ZoneMode = 'off' | 'pressure' | 'speed';
+
 export interface SimParams {
   uFreestream: number;
   sphereRadius: number;
   gamma: number;
   numStreamlines: number;
   wakeEnabled: boolean;
+  zoneMode: ZoneMode;
 }
 
 export const DEFAULT_PARAMS: SimParams = {
@@ -17,6 +20,7 @@ export const DEFAULT_PARAMS: SimParams = {
   gamma: 0.5,
   numStreamlines: 5000,
   wakeEnabled: true,
+  zoneMode: 'pressure',
 };
 
 const DOMAIN_MIN: [number, number, number] = [-4, -3, -3];

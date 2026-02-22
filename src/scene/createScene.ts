@@ -69,22 +69,36 @@ function samplePath(path: PathLookup, t: number): [number, number, number] {
   ];
 }
 
-/**
- * Map velocity magnitude to color via Bernoulli pressure.
- * Cp = 1 - (v/U)^2.  Cp=1 → stagnation (high pressure, blue), Cp<0 → acceleration (low pressure, red).
- */
+/** Pressure coloring: blue (high P / stagnation) → white (ambient) → red (low P / fast) */
 function pressureColor(vMag: number, U: number): [number, number, number] {
   const ratio = vMag / U;
   const cp = 1 - ratio * ratio;
   const t = Math.max(0, Math.min(1, (1 - cp) / 2));
   if (t < 0.5) {
     const s = t * 2;
-    return [s, s, 1];
+    return [s, s, 1]; // blue → white
   } else {
     const s = (t - 0.5) * 2;
-    return [1, 1 - s, 1 - s];
+    return [1, 1 - s, 1 - s]; // white → red
   }
 }
+
+/** Speed coloring: cyan (slow) → white (ambient) → yellow/orange (fast) */
+function speedColor(vMag: number, U: number): [number, number, number] {
+  const ratio = vMag / U;
+  // Map: 0 = stalled, 1 = freestream, >1 = accelerated
+  const t = Math.max(0, Math.min(1, ratio / 2)); // 0=stopped, 0.5=freestream, 1=2x freestream
+  if (t < 0.5) {
+    const s = t * 2; // 0..1
+    return [s, 1, 1]; // cyan → white
+  } else {
+    const s = (t - 0.5) * 2; // 0..1
+    return [1, 1 - s * 0.6, 1 - s]; // white → orange
+  }
+}
+
+/** Flat blue for "off" mode */
+const FLAT_BLUE: [number, number, number] = [0.122, 0.467, 0.706];
 
 export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasElement) {
   const scene = new Scene(engine);
@@ -128,49 +142,64 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   }
   createSphere();
 
-  // ── Pressure zone meshes (analytical placement) ──
-  // High pressure: ellipsoids at front/back stagnation points
-  // Low pressure: torus around equator where flow accelerates
-  const highPressureMat = new StandardMaterial('hiPMat', scene);
-  highPressureMat.diffuseColor = new Color3(0.3, 0.5, 1.0);
-  highPressureMat.emissiveColor = new Color3(0.1, 0.2, 0.6);
-  highPressureMat.alpha = 0.25;
-  highPressureMat.backFaceCulling = false;
+  // ── Zone meshes (pressure or speed mode) ──
+  // Stagnation zones: ellipsoids at front/back
+  // Equator zone: torus where flow is fastest
+  const stagnationMat = new StandardMaterial('stagnationMat', scene);
+  stagnationMat.alpha = 0.25;
+  stagnationMat.backFaceCulling = false;
 
-  const lowPressureMat = new StandardMaterial('loPMat', scene);
-  lowPressureMat.diffuseColor = new Color3(1.0, 0.35, 0.2);
-  lowPressureMat.emissiveColor = new Color3(0.5, 0.1, 0.05);
-  lowPressureMat.alpha = 0.2;
-  lowPressureMat.backFaceCulling = false;
+  const equatorMat = new StandardMaterial('equatorMat', scene);
+  equatorMat.alpha = 0.2;
+  equatorMat.backFaceCulling = false;
 
-  let pressureMeshes: Mesh[] = [];
+  function updateZoneMaterials() {
+    if (currentParams.zoneMode === 'speed') {
+      // Speed: cyan (slow) at stagnation, orange (fast) at equator
+      stagnationMat.diffuseColor = new Color3(0.0, 0.8, 0.9);
+      stagnationMat.emissiveColor = new Color3(0.0, 0.3, 0.4);
+      equatorMat.diffuseColor = new Color3(1.0, 0.6, 0.1);
+      equatorMat.emissiveColor = new Color3(0.5, 0.25, 0.0);
+    } else {
+      // Pressure: blue (high P) at stagnation, red (low P) at equator
+      stagnationMat.diffuseColor = new Color3(0.3, 0.5, 1.0);
+      stagnationMat.emissiveColor = new Color3(0.1, 0.2, 0.6);
+      equatorMat.diffuseColor = new Color3(1.0, 0.35, 0.2);
+      equatorMat.emissiveColor = new Color3(0.5, 0.1, 0.05);
+    }
+  }
+  updateZoneMaterials();
 
-  function buildPressureZones() {
-    for (const m of pressureMeshes) m.dispose();
-    pressureMeshes = [];
+  let zoneMeshes: Mesh[] = [];
 
+  function buildZones() {
+    for (const m of zoneMeshes) m.dispose();
+    zoneMeshes = [];
+
+    if (currentParams.zoneMode === 'off') return;
+
+    updateZoneMaterials();
     const R = currentParams.sphereRadius;
 
-    // Front stagnation zone (upstream, -x direction): high pressure ellipsoid
-    const frontHi = MeshBuilder.CreateSphere('hiPFront', { diameterX: R * 1.2, diameterY: R * 1.8, diameterZ: R * 1.8, segments: 16 }, scene);
+    // Front stagnation ellipsoid
+    const frontHi = MeshBuilder.CreateSphere('zoneFront', { diameterX: R * 1.2, diameterY: R * 1.8, diameterZ: R * 1.8, segments: 16 }, scene);
     frontHi.position = new Vector3(-R * 1.3, 0, 0);
-    frontHi.material = highPressureMat;
-    pressureMeshes.push(frontHi);
+    frontHi.material = stagnationMat;
+    zoneMeshes.push(frontHi);
 
-    // Back stagnation zone (downstream, +x direction): high pressure ellipsoid
-    const backHi = MeshBuilder.CreateSphere('hiPBack', { diameterX: R * 1.2, diameterY: R * 1.8, diameterZ: R * 1.8, segments: 16 }, scene);
+    // Back stagnation ellipsoid
+    const backHi = MeshBuilder.CreateSphere('zoneBack', { diameterX: R * 1.2, diameterY: R * 1.8, diameterZ: R * 1.8, segments: 16 }, scene);
     backHi.position = new Vector3(R * 1.3, 0, 0);
-    backHi.material = highPressureMat;
-    pressureMeshes.push(backHi);
+    backHi.material = stagnationMat;
+    zoneMeshes.push(backHi);
 
-    // Low pressure ring around equator: torus where flow is fastest
-    const loRing = MeshBuilder.CreateTorus('loPRing', { diameter: R * 2.6, thickness: R * 1.0, tessellation: 32 }, scene);
-    // Torus default is in XZ plane — rotate 90° around Z so it wraps around the X-axis (flow axis)
+    // Equator torus
+    const loRing = MeshBuilder.CreateTorus('zoneEquator', { diameter: R * 2.6, thickness: R * 1.0, tessellation: 32 }, scene);
     loRing.rotation = new Vector3(0, 0, Math.PI / 2);
-    loRing.material = lowPressureMat;
-    pressureMeshes.push(loRing);
+    loRing.material = equatorMat;
+    zoneMeshes.push(loRing);
   }
-  buildPressureZones();
+  buildZones();
 
   // SPS particles
   let sps: SolidParticleSystem | null = null;
@@ -216,9 +245,10 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     spsMesh.material = particleMat;
     spsMesh.hasVertexAlpha = true;
 
-    // Initial positions with pressure coloring
+    // Initial positions with mode-aware coloring
     sps.initParticles = () => {
       const U = currentParams.uFreestream;
+      const mode = currentParams.zoneMode;
       for (let i = 0; i < totalParticles; i++) {
         const p = sps!.particles[i];
         const lineIdx = Math.floor(i / particlesPerLine);
@@ -226,11 +256,16 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
           const t = phases[i];
           const [x, y, z] = samplePath(paths[lineIdx], t);
           p.position.set(x, y, z);
-          const [vx, vy, vz] = velocity(x, y, z, currentParams);
-          const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
-          const [cr, cg, cb] = pressureColor(vMag, U);
           const fadeIn = Math.min(t * 8.0, 1.0);
           const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
+          let cr: number, cg: number, cb: number;
+          if (mode === 'off') {
+            [cr, cg, cb] = FLAT_BLUE;
+          } else {
+            const [vx, vy, vz] = velocity(x, y, z, currentParams);
+            const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
+            [cr, cg, cb] = mode === 'speed' ? speedColor(vMag, U) : pressureColor(vMag, U);
+          }
           p.color = new Color4(cr, cg, cb, fadeIn * fadeOut);
         }
       }
@@ -251,6 +286,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     if (!sps || !spsMesh || paths.length === 0) return;
 
     const U = currentParams.uFreestream;
+    const mode = currentParams.zoneMode;
     const speed = U * 0.15;
     const totalParticles = paths.length * particlesPerLine;
 
@@ -264,9 +300,14 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
       const p = sps.particles[i];
       p.position.set(x, y, z);
 
-      const [vx, vy, vz] = velocity(x, y, z, currentParams);
-      const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
-      const [cr, cg, cb] = pressureColor(vMag, U);
+      let cr: number, cg: number, cb: number;
+      if (mode === 'off') {
+        [cr, cg, cb] = FLAT_BLUE;
+      } else {
+        const [vx, vy, vz] = velocity(x, y, z, currentParams);
+        const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
+        [cr, cg, cb] = mode === 'speed' ? speedColor(vMag, U) : pressureColor(vMag, U);
+      }
       const fadeIn = Math.min(t * 8.0, 1.0);
       const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
       if (!p.color) {
@@ -285,7 +326,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     streamlineData = computeStreamlines3D({ ...currentParams, numStreamlines: STREAMLINE_GRID * STREAMLINE_GRID });
     paths = buildPathLookup(streamlineData);
     createSphere();
-    buildPressureZones();
+    buildZones();
     initParticlePhases();
     buildSPS();
   }

@@ -121,6 +121,29 @@ export function createControls(
   selectRow.appendChild(select);
   panel.appendChild(selectRow);
 
+  // --- Zone mode dropdown ---
+  const zoneRow = document.createElement('div');
+  zoneRow.className = 'cp-row';
+  const zoneLabel = document.createElement('label');
+  zoneLabel.className = 'cp-label';
+  zoneLabel.textContent = 'Zones';
+  const zoneSelect = document.createElement('select');
+  zoneSelect.className = 'cp-select';
+  for (const mode of [['off', 'Off'], ['pressure', 'Pressure'], ['speed', 'Speed']] as const) {
+    const opt = document.createElement('option');
+    opt.value = mode[0];
+    opt.textContent = mode[1];
+    if (mode[0] === params.zoneMode) opt.selected = true;
+    zoneSelect.appendChild(opt);
+  }
+  zoneSelect.addEventListener('change', () => {
+    params.zoneMode = zoneSelect.value as SimParams['zoneMode'];
+    scheduleUpdate();
+  });
+  zoneRow.appendChild(zoneLabel);
+  zoneRow.appendChild(zoneSelect);
+  panel.appendChild(zoneRow);
+
   // --- Wake checkbox ---
   const checkRow = document.createElement('div');
   checkRow.className = 'cp-row';
@@ -156,6 +179,7 @@ export function createControls(
     gammaSlider.input.value = String(params.gamma);
     gammaSlider.valSpan.textContent = params.gamma.toFixed(1);
     select.value = String(params.numStreamlines);
+    zoneSelect.value = params.zoneMode;
     checkbox.checked = params.wakeEnabled;
     callbacks.onReset();
   });
