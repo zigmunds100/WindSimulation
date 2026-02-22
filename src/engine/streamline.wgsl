@@ -23,6 +23,6 @@ fn vs(@location(0) position: vec2f) -> VSOut {
 
 @fragment
 fn fs() -> @location(0) vec4f {
-  // matplotlib C0 blue: #1f77b4
-  return vec4f(0.122, 0.467, 0.706, 1.0);
+  // Faint guide lines (particles are the main visual)
+  return vec4f(0.7, 0.82, 0.92, 0.35);
 }

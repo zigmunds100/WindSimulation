@@ -1,6 +1,8 @@
 import './style.css';
 import { createScene } from './scene/createScene';
 import { createAxes } from './ui/axes';
+import { createControls } from './ui/controls';
+import { DEFAULT_PARAMS } from './streamlines/compute';
 
 declare global {
   interface Window {
@@ -51,20 +53,65 @@ async function main() {
   // Create axes overlay
   createAxes();
 
-  // Initial render
-  function renderFrame() {
+  // Render helper
+  function renderFrame(dt: number) {
     const textureView = context.getCurrentTexture().createView();
-    scene.render(textureView);
+    scene.render(textureView, dt);
   }
-  renderFrame();
 
-  // Mark ready immediately (static render, no animation needed)
+  // Initial render
+  renderFrame(0);
+
+  // Mark ready
   window.__simReady = true;
+
+  // --- UI Controls ---
+  let paused = false;
+
+  const controls = createControls({ ...DEFAULT_PARAMS }, {
+    onParamChange(params) {
+      if (!paused) {
+        scene.rebuild(params);
+      }
+    },
+    onReset() {
+      scene.rebuild({ ...DEFAULT_PARAMS });
+    },
+    onPauseToggle(p) {
+      paused = p;
+    },
+  });
+
+  // --- Animation loop with FPS tracking ---
+  let frameCount = 0;
+  let lastFpsTime = performance.now();
+  let lastFrameTime = performance.now();
+
+  function animationLoop() {
+    const now = performance.now();
+    const dt = Math.min((now - lastFrameTime) / 1000, 0.1); // seconds, capped
+    lastFrameTime = now;
+
+    frameCount++;
+    if (now - lastFpsTime >= 500) {
+      const fps = (frameCount / (now - lastFpsTime)) * 1000;
+      controls.updateFPS(fps);
+      frameCount = 0;
+      lastFpsTime = now;
+    }
+
+    if (!paused) {
+      renderFrame(dt);
+    }
+
+    requestAnimationFrame(animationLoop);
+  }
+  requestAnimationFrame(animationLoop);
 
   // Re-render on resize
   window.addEventListener('resize', () => {
     configureCanvas();
-    renderFrame();
+    renderFrame(0);
   });
 }
 

@@ -49,7 +49,13 @@ export function createStreamlineRenderer(
     fragment: {
       module: shaderModule,
       entryPoint: 'fs',
-      targets: [{ format: canvasFormat }],
+      targets: [{
+        format: canvasFormat,
+        blend: {
+          color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
+          alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+        },
+      }],
     },
     primitive: { topology: 'line-strip' },
   });

@@ -3,58 +3,85 @@
  * for potential flow around a cylinder (2D cross-section of sphere).
  */
 
+export interface SimParams {
+  uFreestream: number;
+  sphereRadius: number;
+  gamma: number;
+  numStreamlines: number;
+  wakeEnabled: boolean;
+}
+
+export const DEFAULT_PARAMS: SimParams = {
+  uFreestream: 1.0,
+  sphereRadius: 1.0,
+  gamma: 0.5,
+  numStreamlines: 40,
+  wakeEnabled: true,
+};
+
 const DOMAIN_MIN: [number, number] = [-4, -3];
 const DOMAIN_MAX: [number, number] = [8, 3];
 const SPHERE_CENTER: [number, number] = [0, 0];
-const SPHERE_RADIUS = 1.0;
-const U_FREESTREAM = 1.0;
 
-const NUM_STREAMLINES = 40;
 const RK4_DT = 0.02;
 const MAX_STEPS = 2000;
 const ARROW_ARC_SPACING = 1.5; // world units between arrow markers
-const ARROW_SIZE = 0.08;
 
-/** Potential flow velocity field (no wake) */
-function velocity(x: number, y: number): [number, number] {
+/** Potential flow velocity field with optional wake */
+function velocity(x: number, y: number, params: SimParams): [number, number] {
+  const { uFreestream, sphereRadius, gamma, wakeEnabled } = params;
   const dx = x - SPHERE_CENTER[0];
   const dy = y - SPHERE_CENTER[1];
   const r2 = dx * dx + dy * dy;
-  const R2 = SPHERE_RADIUS * SPHERE_RADIUS;
+  const R2 = sphereRadius * sphereRadius;
 
   if (r2 < 0.01) return [0, 0]; // avoid singularity
 
   const r4 = r2 * r2;
-  const vx = U_FREESTREAM * (1.0 - R2 * (dx * dx - dy * dy) / r4);
-  const vy = U_FREESTREAM * (-2.0 * R2 * dx * dy / r4);
+  let vx = uFreestream * (1.0 - R2 * (dx * dx - dy * dy) / r4);
+  let vy = uFreestream * (-2.0 * R2 * dx * dy / r4);
+
+  // Wake vortex field: sinusoidal von-Karman-like perturbation behind sphere
+  if (wakeEnabled && gamma > 0 && dx > 0) {
+    const xBehind = dx / sphereRadius;
+    const yNorm = dy / sphereRadius;
+    const decay = Math.exp(-0.15 * xBehind); // slower decay for wider wake
+    const yEnv = Math.exp(-0.5 * yNorm * yNorm); // broader transverse envelope
+    const perturbation = gamma * decay * yEnv;
+    // Sinusoidal cross-flow perturbation
+    const freq = 2.0 * Math.PI * 0.5; // ~0.5 cycles per radius — wider oscillation
+    vx += perturbation * Math.sin(freq * xBehind) * 0.5;
+    vy += perturbation * Math.cos(freq * xBehind) * 1.5;
+  }
+
   return [vx, vy];
 }
 
 /** Check if point is inside sphere (with small buffer) */
-function insideSphere(x: number, y: number, buffer = 0.0): boolean {
+function insideSphere(x: number, y: number, params: SimParams, buffer = 0.0): boolean {
   const dx = x - SPHERE_CENTER[0];
   const dy = y - SPHERE_CENTER[1];
-  return dx * dx + dy * dy < (SPHERE_RADIUS + buffer) * (SPHERE_RADIUS + buffer);
+  return dx * dx + dy * dy < (params.sphereRadius + buffer) * (params.sphereRadius + buffer);
 }
 
 /** Project point outside sphere if it enters */
-function projectOutside(x: number, y: number): [number, number] {
+function projectOutside(x: number, y: number, params: SimParams): [number, number] {
   const dx = x - SPHERE_CENTER[0];
   const dy = y - SPHERE_CENTER[1];
   const r = Math.sqrt(dx * dx + dy * dy);
-  if (r < SPHERE_RADIUS * 1.01) {
-    const scale = (SPHERE_RADIUS * 1.01) / r;
+  if (r < params.sphereRadius * 1.01) {
+    const scale = (params.sphereRadius * 1.01) / r;
     return [SPHERE_CENTER[0] + dx * scale, SPHERE_CENTER[1] + dy * scale];
   }
   return [x, y];
 }
 
 /** RK4 step */
-function rk4Step(x: number, y: number, dt: number): [number, number] {
-  const [k1x, k1y] = velocity(x, y);
-  const [k2x, k2y] = velocity(x + 0.5 * dt * k1x, y + 0.5 * dt * k1y);
-  const [k3x, k3y] = velocity(x + 0.5 * dt * k2x, y + 0.5 * dt * k2y);
-  const [k4x, k4y] = velocity(x + dt * k3x, y + dt * k3y);
+function rk4Step(x: number, y: number, dt: number, params: SimParams): [number, number] {
+  const [k1x, k1y] = velocity(x, y, params);
+  const [k2x, k2y] = velocity(x + 0.5 * dt * k1x, y + 0.5 * dt * k1y, params);
+  const [k3x, k3y] = velocity(x + 0.5 * dt * k2x, y + 0.5 * dt * k2y, params);
+  const [k4x, k4y] = velocity(x + dt * k3x, y + dt * k3y, params);
 
   const nx = x + (dt / 6) * (k1x + 2 * k2x + 2 * k3x + k4x);
   const ny = y + (dt / 6) * (k1y + 2 * k2y + 2 * k3y + k4y);
@@ -70,7 +97,7 @@ export interface StreamlineData {
   arrows: Float32Array;
 }
 
-export function computeStreamlines(): StreamlineData {
+export function computeStreamlines(params: SimParams = DEFAULT_PARAMS): StreamlineData {
   const allVertices: number[] = [];
   const segments: Array<{ offset: number; count: number }> = [];
   const allArrows: number[] = [];
@@ -79,8 +106,8 @@ export function computeStreamlines(): StreamlineData {
   const yMin = DOMAIN_MIN[1];
   const yMax = DOMAIN_MAX[1];
 
-  for (let i = 0; i < NUM_STREAMLINES; i++) {
-    const yStart = yMin + (i + 0.5) * (yMax - yMin) / NUM_STREAMLINES;
+  for (let i = 0; i < params.numStreamlines; i++) {
+    const yStart = yMin + (i + 0.5) * (yMax - yMin) / params.numStreamlines;
     const xStart = DOMAIN_MIN[0];
 
     const offset = allVertices.length;
@@ -98,10 +125,10 @@ export function computeStreamlines(): StreamlineData {
       // Adaptive step size near sphere
       const dx = x - SPHERE_CENTER[0];
       const dy = y - SPHERE_CENTER[1];
-      const distToSphere = Math.sqrt(dx * dx + dy * dy) - SPHERE_RADIUS;
+      const distToSphere = Math.sqrt(dx * dx + dy * dy) - params.sphereRadius;
       const dt = distToSphere < 0.5 ? RK4_DT * 0.5 : RK4_DT;
 
-      const [nx, ny] = rk4Step(x, y, dt);
+      const [nx, ny] = rk4Step(x, y, dt, params);
 
       // Check bounds
       if (nx < DOMAIN_MIN[0] || nx > DOMAIN_MAX[0] || ny < DOMAIN_MIN[1] || ny > DOMAIN_MAX[1]) {
@@ -109,10 +136,10 @@ export function computeStreamlines(): StreamlineData {
       }
 
       // Project outside sphere if needed
-      const [px, py] = projectOutside(nx, ny);
+      const [px, py] = projectOutside(nx, ny, params);
 
       // If stuck inside sphere, stop this streamline
-      if (insideSphere(px, py, 0.005)) {
+      if (insideSphere(px, py, params, 0.005)) {
         break;
       }
 
@@ -129,7 +156,7 @@ export function computeStreamlines(): StreamlineData {
 
       // Place arrow markers at arc-length intervals
       if (arcLength - lastArrowArc >= ARROW_ARC_SPACING) {
-        const [vx, vy] = velocity(x, y);
+        const [vx, vy] = velocity(x, y, params);
         const angle = Math.atan2(vy, vx);
         allArrows.push(x, y, angle);
         lastArrowArc = arcLength;
