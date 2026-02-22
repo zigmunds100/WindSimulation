@@ -21,9 +21,11 @@ interface IsoLevel {
 }
 
 const ISO_LEVELS: IsoLevel[] = [
-  { value:  0.3, pressureColor: [0.3, 0.5, 1.0], speedColor: [0.0, 0.8, 0.9], alpha: 0.30, emissiveFactor: 0.5 },
-  { value: -0.2, pressureColor: [1.0, 0.5, 0.25], speedColor: [1.0, 0.7, 0.2], alpha: 0.25, emissiveFactor: 0.4 },
-  { value: -0.7, pressureColor: [0.9, 0.15, 0.1], speedColor: [1.0, 0.45, 0.0], alpha: 0.30, emissiveFactor: 0.5 },
+  // Pressure mode uses aerodynamic convention: high pressure = warm colors,
+  // suction/low pressure = cool colors.
+  { value:  0.6, pressureColor: [0.95, 0.2, 0.15], speedColor: [0.0, 0.8, 0.9], alpha: 0.26, emissiveFactor: 0.45 },
+  { value:  0.0, pressureColor: [0.95, 0.75, 0.25], speedColor: [1.0, 0.7, 0.2], alpha: 0.22, emissiveFactor: 0.35 },
+  { value: -0.8, pressureColor: [0.2, 0.45, 1.0], speedColor: [1.0, 0.45, 0.0], alpha: 0.30, emissiveFactor: 0.5 },
 ];
 
 const GRID_RES = 60;
