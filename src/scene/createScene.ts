@@ -75,17 +75,14 @@ function samplePath(path: PathLookup, t: number): [number, number, number] {
  */
 function pressureColor(vMag: number, U: number): [number, number, number] {
   const ratio = vMag / U;
-  // Cp in [-∞, 1], but practically [-3, 1] for potential flow around sphere
   const cp = 1 - ratio * ratio;
-  // Map cp: 1 (stagnation) → blue, 0 (freestream) → white, <0 (accelerated) → red
-  const t = Math.max(0, Math.min(1, (1 - cp) / 2)); // 0=high pressure, 1=low pressure
-  // Blue → White → Red
+  const t = Math.max(0, Math.min(1, (1 - cp) / 2));
   if (t < 0.5) {
-    const s = t * 2; // 0..1
-    return [s, s, 1]; // blue to white
+    const s = t * 2;
+    return [s, s, 1];
   } else {
-    const s = (t - 0.5) * 2; // 0..1
-    return [1, 1 - s, 1 - s]; // white to red
+    const s = (t - 0.5) * 2;
+    return [1, 1 - s, 1 - s];
   }
 }
 
@@ -130,6 +127,50 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     sphereMesh.material = sphereMat;
   }
   createSphere();
+
+  // ── Pressure zone meshes (analytical placement) ──
+  // High pressure: ellipsoids at front/back stagnation points
+  // Low pressure: torus around equator where flow accelerates
+  const highPressureMat = new StandardMaterial('hiPMat', scene);
+  highPressureMat.diffuseColor = new Color3(0.3, 0.5, 1.0);
+  highPressureMat.emissiveColor = new Color3(0.1, 0.2, 0.6);
+  highPressureMat.alpha = 0.25;
+  highPressureMat.backFaceCulling = false;
+
+  const lowPressureMat = new StandardMaterial('loPMat', scene);
+  lowPressureMat.diffuseColor = new Color3(1.0, 0.35, 0.2);
+  lowPressureMat.emissiveColor = new Color3(0.5, 0.1, 0.05);
+  lowPressureMat.alpha = 0.2;
+  lowPressureMat.backFaceCulling = false;
+
+  let pressureMeshes: Mesh[] = [];
+
+  function buildPressureZones() {
+    for (const m of pressureMeshes) m.dispose();
+    pressureMeshes = [];
+
+    const R = currentParams.sphereRadius;
+
+    // Front stagnation zone (upstream, -x direction): high pressure ellipsoid
+    const frontHi = MeshBuilder.CreateSphere('hiPFront', { diameterX: R * 1.2, diameterY: R * 1.8, diameterZ: R * 1.8, segments: 16 }, scene);
+    frontHi.position = new Vector3(-R * 1.3, 0, 0);
+    frontHi.material = highPressureMat;
+    pressureMeshes.push(frontHi);
+
+    // Back stagnation zone (downstream, +x direction): high pressure ellipsoid
+    const backHi = MeshBuilder.CreateSphere('hiPBack', { diameterX: R * 1.2, diameterY: R * 1.8, diameterZ: R * 1.8, segments: 16 }, scene);
+    backHi.position = new Vector3(R * 1.3, 0, 0);
+    backHi.material = highPressureMat;
+    pressureMeshes.push(backHi);
+
+    // Low pressure ring around equator: torus where flow is fastest
+    const loRing = MeshBuilder.CreateTorus('loPRing', { diameter: R * 2.6, thickness: R * 1.0, tessellation: 32 }, scene);
+    // Torus default is in XZ plane — rotate 90° around Z so it wraps around the X-axis (flow axis)
+    loRing.rotation = new Vector3(0, 0, Math.PI / 2);
+    loRing.material = lowPressureMat;
+    pressureMeshes.push(loRing);
+  }
+  buildPressureZones();
 
   // SPS particles
   let sps: SolidParticleSystem | null = null;
@@ -241,10 +282,10 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
 
   function rebuild(params: SimParams) {
     currentParams = { ...params };
-    // Always compute streamlines on the fixed dense grid; numStreamlines controls particle count only
     streamlineData = computeStreamlines3D({ ...currentParams, numStreamlines: STREAMLINE_GRID * STREAMLINE_GRID });
     paths = buildPathLookup(streamlineData);
     createSphere();
+    buildPressureZones();
     initParticlePhases();
     buildSPS();
   }
