@@ -41,23 +41,30 @@ export function sampleCp(
   const V2 = Vr * Vr + Vt * Vt;
   let cp = 1 - V2 / (U * U);
 
-  // Wake correction
+  // Wake correction:
+  // For a bluff body, separated wake lowers base pressure mainly in the
+  // downstream region. We blend toward a negative Cp core behind the sphere
+  // and recover gradually downstream/radially.
   if (wakeEnabled && gamma > 0) {
-    const CpBase = -0.4 * gamma;
-    const sepX = a * Math.cos(100 * Math.PI / 180); // ~cos(100°) ≈ -0.17a
+    const cpBase = -0.45 * gamma;
+    // Separation on a sphere is typically around 75–85° from the rear
+    // stagnation direction for moderate/high Reynolds number.
+    const sepX = a * Math.cos(80 * Math.PI / 180); // ~ +0.17a (downstream hemisphere)
 
     if (px > sepX) {
-      const s = px; // axial distance
+      const s = px - sepX; // downstream distance from separation plane
       const rPerp = Math.sqrt(py * py + pz * pz);
 
       const wakeLength = a * 6;
-      const wakeRadius0 = a * 0.8;
-      const wakeRadiusSlope = 0.3;
+      const wakeRadius0 = a * 0.75;
+      const wakeRadiusSlope = 0.22;
 
       // smoothstep for axial blending
-      const t0 = (s - a) / wakeLength;
+      const t0 = s / wakeLength;
       const tClamped = Math.max(0, Math.min(1, t0));
-      const axial = tClamped * tClamped * (3 - 2 * tClamped);
+      const axialBuild = tClamped * tClamped * (3 - 2 * tClamped);
+      const axialDecay = Math.exp(-1.5 * tClamped);
+      const axial = axialBuild * axialDecay;
 
       // radial Gaussian mask
       const localRadius = wakeRadius0 + wakeRadiusSlope * Math.max(0, s - a);
@@ -65,7 +72,7 @@ export function sampleCp(
       const radial = Math.exp(-rNorm * rNorm);
 
       const w = Math.max(0, Math.min(1, axial * radial));
-      cp = cp * (1 - w) + CpBase * w;
+      cp = cp * (1 - w) + cpBase * w;
     }
   }
 
