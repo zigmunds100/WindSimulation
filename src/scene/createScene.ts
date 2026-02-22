@@ -218,10 +218,10 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   function applyFluidTheme() {
     const isWater = currentParams.fluid === 'water';
     if (isWater) {
-      scene.clearColor = new Color4(0.02, 0.06, 0.12, 1);
-      hemiLight.diffuse = new Color3(0.5, 0.7, 0.9);
-      hemiLight.groundColor = new Color3(0.05, 0.1, 0.2);
-      pointLight.diffuse = new Color3(0.6, 0.8, 1.0);
+      scene.clearColor = new Color4(0.14, 0.24, 0.38, 1);
+      hemiLight.diffuse = new Color3(0.7, 0.85, 1.0);
+      hemiLight.groundColor = new Color3(0.15, 0.2, 0.3);
+      pointLight.diffuse = new Color3(0.8, 0.9, 1.0);
       sphereMat.albedoColor = new Color3(0.8, 0.85, 0.9);
       sphereMat.metallic = 0.15;
       sphereMat.roughness = 0.3;
@@ -276,8 +276,8 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
 
     // Configure target renderer for water-like appearance
     const tr = fluidRenderObject.targetRenderer;
-    tr.fluidColor = new Color3(0.08, 0.35, 0.65);      // ocean blue
-    tr.density = 1.5;                                   // moderate opacity — let scene show through
+    tr.fluidColor = new Color3(0.15, 0.45, 0.75);      // brighter ocean blue
+    tr.density = 1.2;                                   // lighter opacity — more translucent
     tr.refractionStrength = 0.12;                        // noticeable refraction distortion
     tr.fresnelClamp = 0.7;                              // strong Fresnel edge brightening
     tr.specularPower = 200;                              // focused specular highlight
