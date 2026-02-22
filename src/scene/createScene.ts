@@ -11,7 +11,7 @@ import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine';
 import type { SolidParticle } from '@babylonjs/core/Particles/solidParticle';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 
-import { computeStreamlines3D, DEFAULT_PARAMS, type SimParams, type StreamlineData3D } from '../streamlines/compute';
+import { computeStreamlines3D, velocity, DEFAULT_PARAMS, type SimParams, type StreamlineData3D } from '../streamlines/compute';
 
 /** Fixed streamline grid density — always compute this many paths */
 const STREAMLINE_GRID = 14; // 14x14 = 196 streamlines
@@ -69,6 +69,26 @@ function samplePath(path: PathLookup, t: number): [number, number, number] {
   ];
 }
 
+/**
+ * Map velocity magnitude to color via Bernoulli pressure.
+ * Cp = 1 - (v/U)^2.  Cp=1 → stagnation (high pressure, blue), Cp<0 → acceleration (low pressure, red).
+ */
+function pressureColor(vMag: number, U: number): [number, number, number] {
+  const ratio = vMag / U;
+  // Cp in [-∞, 1], but practically [-3, 1] for potential flow around sphere
+  const cp = 1 - ratio * ratio;
+  // Map cp: 1 (stagnation) → blue, 0 (freestream) → white, <0 (accelerated) → red
+  const t = Math.max(0, Math.min(1, (1 - cp) / 2)); // 0=high pressure, 1=low pressure
+  // Blue → White → Red
+  if (t < 0.5) {
+    const s = t * 2; // 0..1
+    return [s, s, 1]; // blue to white
+  } else {
+    const s = (t - 0.5) * 2; // 0..1
+    return [1, 1 - s, 1 - s]; // white to red
+  }
+}
+
 export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasElement) {
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.12, 0.12, 0.14, 1);
@@ -115,8 +135,8 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   let sps: SolidParticleSystem | null = null;
   let spsMesh: Mesh | null = null;
   const particleMat = new StandardMaterial('particleMat', scene);
-  particleMat.diffuseColor = new Color3(0.122, 0.467, 0.706); // #1f77b4
-  particleMat.emissiveColor = new Color3(0.08, 0.3, 0.5);
+  particleMat.diffuseColor = new Color3(1, 1, 1);
+  particleMat.emissiveColor = new Color3(0.3, 0.3, 0.3);
   particleMat.disableLighting = false;
 
   function initParticlePhases() {
@@ -155,8 +175,9 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     spsMesh.material = particleMat;
     spsMesh.hasVertexAlpha = true;
 
-    // Initial positions
+    // Initial positions with pressure coloring
     sps.initParticles = () => {
+      const U = currentParams.uFreestream;
       for (let i = 0; i < totalParticles; i++) {
         const p = sps!.particles[i];
         const lineIdx = Math.floor(i / particlesPerLine);
@@ -164,9 +185,12 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
           const t = phases[i];
           const [x, y, z] = samplePath(paths[lineIdx], t);
           p.position.set(x, y, z);
+          const [vx, vy, vz] = velocity(x, y, z, currentParams);
+          const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
+          const [cr, cg, cb] = pressureColor(vMag, U);
           const fadeIn = Math.min(t * 8.0, 1.0);
           const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
-          p.color = new Color4(0.122, 0.467, 0.706, fadeIn * fadeOut);
+          p.color = new Color4(cr, cg, cb, fadeIn * fadeOut);
         }
       }
     };
@@ -185,7 +209,8 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     const dt = engine.getDeltaTime() / 1000;
     if (!sps || !spsMesh || paths.length === 0) return;
 
-    const speed = currentParams.uFreestream * 0.15;
+    const U = currentParams.uFreestream;
+    const speed = U * 0.15;
     const totalParticles = paths.length * particlesPerLine;
 
     for (let i = 0; i < totalParticles; i++) {
@@ -198,11 +223,15 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
       const p = sps.particles[i];
       p.position.set(x, y, z);
 
+      const [vx, vy, vz] = velocity(x, y, z, currentParams);
+      const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
+      const [cr, cg, cb] = pressureColor(vMag, U);
       const fadeIn = Math.min(t * 8.0, 1.0);
       const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
       if (!p.color) {
-        p.color = new Color4(0.122, 0.467, 0.706, fadeIn * fadeOut);
+        p.color = new Color4(cr, cg, cb, fadeIn * fadeOut);
       } else {
+        p.color.r = cr; p.color.g = cg; p.color.b = cb;
         p.color.a = fadeIn * fadeOut;
       }
     }

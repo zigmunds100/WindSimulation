@@ -15,7 +15,7 @@ export const DEFAULT_PARAMS: SimParams = {
   uFreestream: 1.0,
   sphereRadius: 1.0,
   gamma: 0.5,
-  numStreamlines: 20000,
+  numStreamlines: 5000,
   wakeEnabled: true,
 };
 
@@ -28,7 +28,7 @@ const MAX_STEPS = 2000;
 type Vec3 = [number, number, number];
 
 /** 3D potential flow velocity around a sphere + optional wake */
-function velocity(x: number, y: number, z: number, params: SimParams): Vec3 {
+export function velocity(x: number, y: number, z: number, params: SimParams): Vec3 {
   const { uFreestream: U, sphereRadius: R, gamma, wakeEnabled } = params;
   const r2 = x * x + y * y + z * z;
 
