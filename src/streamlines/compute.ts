@@ -7,20 +7,38 @@ export type FluidType = 'air' | 'water';
 
 export interface SimParams {
   uFreestream: number;
+  density: number;
   sphereRadius: number;
   gamma: number;
   numStreamlines: number;
   wakeEnabled: boolean;
   fluid: FluidType;
+  pressureSurfaceEnabled: boolean;
+  pressureSlicesEnabled: boolean;
+  pressureContours: boolean;
+  thetaSepDeg: number;
+  cpWakeBase: number;
+  wakeStrength: number;
+  wakeSigma: number;
+  wakeLength: number;
 }
 
 export const DEFAULT_PARAMS: SimParams = {
   uFreestream: 1.0,
+  density: 1.2,
   sphereRadius: 1.0,
   gamma: 0.5,
   numStreamlines: 5000,
   wakeEnabled: true,
   fluid: 'water',
+  pressureSurfaceEnabled: true,
+  pressureSlicesEnabled: true,
+  pressureContours: true,
+  thetaSepDeg: 110,
+  cpWakeBase: -0.35,
+  wakeStrength: 0.45,
+  wakeSigma: 1.0,
+  wakeLength: 5.0,
 };
 
 const DOMAIN_MIN: [number, number, number] = [-4, -3, -3];

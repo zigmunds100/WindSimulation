@@ -4,6 +4,7 @@
  */
 
 import { type SimParams, DEFAULT_PARAMS } from '../streamlines/compute';
+import { PRESSURE_SLIDERS } from '../pressureViz/ui';
 
 export interface ControlCallbacks {
   onParamChange: (params: SimParams) => void;
@@ -43,6 +44,7 @@ export function createControls(
     step: number,
     value: number,
     onChange: (v: number) => void,
+    format: (v: number) => string = (v) => v.toFixed(1),
   ) {
     const row = document.createElement('div');
     row.className = 'cp-row';
@@ -65,7 +67,7 @@ export function createControls(
 
     input.addEventListener('input', () => {
       const v = parseFloat(input.value);
-      valSpan.textContent = v.toFixed(1);
+      valSpan.textContent = format(v);
       onChange(v);
       scheduleUpdate();
     });
@@ -97,6 +99,67 @@ export function createControls(
   const gammaSlider = makeSliderRow('Gamma (wake)', 0.0, 2.0, 0.1, params.gamma, (v) => {
     params.gamma = v;
   });
+
+  const pressureSurface = document.createElement('input');
+  pressureSurface.type = 'checkbox';
+  pressureSurface.className = 'cp-checkbox';
+  pressureSurface.checked = params.pressureSurfaceEnabled;
+  const pressureSurfaceRow = document.createElement('div');
+  pressureSurfaceRow.className = 'cp-row';
+  const pressureSurfaceLabel = document.createElement('label');
+  pressureSurfaceLabel.className = 'cp-label';
+  pressureSurfaceLabel.textContent = 'Surface Cp';
+  pressureSurface.addEventListener('change', () => {
+    params.pressureSurfaceEnabled = pressureSurface.checked;
+    scheduleUpdate();
+  });
+  pressureSurfaceRow.appendChild(pressureSurfaceLabel);
+  pressureSurfaceRow.appendChild(pressureSurface);
+  panel.appendChild(pressureSurfaceRow);
+
+  const pressureSlices = document.createElement('input');
+  pressureSlices.type = 'checkbox';
+  pressureSlices.className = 'cp-checkbox';
+  pressureSlices.checked = params.pressureSlicesEnabled;
+  const pressureSlicesRow = document.createElement('div');
+  pressureSlicesRow.className = 'cp-row';
+  const pressureSlicesLabel = document.createElement('label');
+  pressureSlicesLabel.className = 'cp-label';
+  pressureSlicesLabel.textContent = 'Pressure slices';
+  pressureSlices.addEventListener('change', () => {
+    params.pressureSlicesEnabled = pressureSlices.checked;
+    scheduleUpdate();
+  });
+  pressureSlicesRow.appendChild(pressureSlicesLabel);
+  pressureSlicesRow.appendChild(pressureSlices);
+  panel.appendChild(pressureSlicesRow);
+
+  const pressureContours = document.createElement('input');
+  pressureContours.type = 'checkbox';
+  pressureContours.className = 'cp-checkbox';
+  pressureContours.checked = params.pressureContours;
+  const pressureContoursRow = document.createElement('div');
+  pressureContoursRow.className = 'cp-row';
+  const pressureContoursLabel = document.createElement('label');
+  pressureContoursLabel.className = 'cp-label';
+  pressureContoursLabel.textContent = 'Cp contours';
+  pressureContours.addEventListener('change', () => {
+    params.pressureContours = pressureContours.checked;
+    scheduleUpdate();
+  });
+  pressureContoursRow.appendChild(pressureContoursLabel);
+  pressureContoursRow.appendChild(pressureContours);
+  panel.appendChild(pressureContoursRow);
+
+  const pressureSliderRefs: Array<{ key: keyof SimParams; input: HTMLInputElement; valSpan: HTMLSpanElement; fmt: (v: number) => string }> = [];
+  for (const slider of PRESSURE_SLIDERS) {
+    const fmt = slider.step >= 1 ? (v: number) => v.toFixed(0) : slider.step >= 0.1 ? (v: number) => v.toFixed(1) : (v: number) => v.toFixed(2);
+    const row = makeSliderRow(slider.label, slider.min, slider.max, slider.step, Number(params[slider.key]), (v) => {
+      (params as Record<string, number>)[slider.key] = v;
+    }, fmt);
+    row.valSpan.textContent = fmt(Number(params[slider.key]));
+    pressureSliderRefs.push({ key: slider.key, input: row.input, valSpan: row.valSpan, fmt });
+  }
 
   // --- Streamline count dropdown ---
   const selectRow = document.createElement('div');
@@ -181,6 +244,13 @@ export function createControls(
     select.value = String(params.numStreamlines);
     fluidSelect.value = params.fluid;
     checkbox.checked = params.wakeEnabled;
+    pressureSurface.checked = params.pressureSurfaceEnabled;
+    pressureSlices.checked = params.pressureSlicesEnabled;
+    pressureContours.checked = params.pressureContours;
+    for (const slider of pressureSliderRefs) {
+      slider.input.value = String(params[slider.key]);
+      slider.valSpan.textContent = slider.fmt(Number(params[slider.key]));
+    }
     callbacks.onReset();
   });
 
