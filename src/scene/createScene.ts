@@ -11,6 +11,19 @@ import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine';
 import type { SolidParticle } from '@babylonjs/core/Particles/solidParticle';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 
+// Screen-space fluid rendering — register scene.enableFluidRenderer + all GLSL shaders
+import '@babylonjs/core/Rendering/fluidRenderer/fluidRenderer';
+import '@babylonjs/core/Shaders/fluidRenderingParticleDepth.vertex';
+import '@babylonjs/core/Shaders/fluidRenderingParticleDepth.fragment';
+import '@babylonjs/core/Shaders/fluidRenderingParticleThickness.vertex';
+import '@babylonjs/core/Shaders/fluidRenderingParticleThickness.fragment';
+import '@babylonjs/core/Shaders/fluidRenderingParticleDiffuse.vertex';
+import '@babylonjs/core/Shaders/fluidRenderingParticleDiffuse.fragment';
+import '@babylonjs/core/Shaders/fluidRenderingBilateralBlur.fragment';
+import '@babylonjs/core/Shaders/fluidRenderingStandardBlur.fragment';
+import '@babylonjs/core/Shaders/fluidRenderingRender.fragment';
+import { FluidRenderingObjectCustomParticles } from '@babylonjs/core/Rendering/fluidRenderer/fluidRenderingObjectCustomParticles';
+import type { FluidRenderer, IFluidRenderingRenderObject } from '@babylonjs/core/Rendering/fluidRenderer/fluidRenderer';
 import { computeStreamlines3D, velocity, DEFAULT_PARAMS, type SimParams, type StreamlineData3D } from '../streamlines/compute';
 
 /** Fixed streamline grid density — always compute this many paths */
@@ -97,8 +110,8 @@ function speedColor(vMag: number, U: number): [number, number, number] {
   }
 }
 
-/** Flat blue for "off" mode */
-const FLAT_BLUE: [number, number, number] = [0.122, 0.467, 0.706];
+/** Flat color for "off" mode — set per fluid */
+let FLAT_COLOR: [number, number, number] = [0.122, 0.467, 0.706];
 
 export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasElement) {
   const scene = new Scene(engine);
@@ -201,6 +214,107 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   }
   buildZones();
 
+  // ── Fluid theme ──
+  function applyFluidTheme() {
+    const isWater = currentParams.fluid === 'water';
+    if (isWater) {
+      scene.clearColor = new Color4(0.02, 0.06, 0.12, 1);
+      hemiLight.diffuse = new Color3(0.5, 0.7, 0.9);
+      hemiLight.groundColor = new Color3(0.05, 0.1, 0.2);
+      pointLight.diffuse = new Color3(0.6, 0.8, 1.0);
+      sphereMat.albedoColor = new Color3(0.8, 0.85, 0.9);
+      sphereMat.metallic = 0.15;
+      sphereMat.roughness = 0.3;
+      FLAT_COLOR = [0.15, 0.55, 0.75];
+    } else {
+      scene.clearColor = new Color4(0.12, 0.12, 0.14, 1);
+      hemiLight.diffuse = new Color3(0.9, 0.9, 1.0);
+      hemiLight.groundColor = new Color3(0.3, 0.3, 0.35);
+      pointLight.diffuse = new Color3(1, 0.95, 0.9);
+      sphereMat.albedoColor = new Color3(0.95, 0.95, 0.95);
+      sphereMat.metallic = 0.05;
+      sphereMat.roughness = 0.45;
+      FLAT_COLOR = [0.122, 0.467, 0.706];
+    }
+  }
+  applyFluidTheme();
+
+  // ── Screen-space fluid renderer state ──
+  let fluidRenderer: FluidRenderer | null = null;
+  let fluidRenderObject: IFluidRenderingRenderObject | null = null;
+  let fluidPositions: Float32Array = new Float32Array(0);
+  let fluidCustomParticles: FluidRenderingObjectCustomParticles | null = null;
+
+  function enableFluidRendering(totalParticles: number) {
+    disableFluidRendering();
+
+    fluidRenderer = scene.enableFluidRenderer()!;
+    if (!fluidRenderer) return;
+
+    fluidPositions = new Float32Array(totalParticles * 3);
+    // Initialize positions from current phases so first frame isn't blank
+    for (let i = 0; i < totalParticles; i++) {
+      const lineIdx = Math.floor(i / particlesPerLine);
+      if (lineIdx < paths.length) {
+        const t = phases[i];
+        const [x, y, z] = samplePath(paths[lineIdx], t);
+        fluidPositions[i * 3] = x;
+        fluidPositions[i * 3 + 1] = y;
+        fluidPositions[i * 3 + 2] = z;
+      }
+    }
+
+    fluidRenderObject = fluidRenderer.addCustomParticles(
+      { position: fluidPositions },
+      totalParticles,
+      false, // no diffuse texture — use fluidColor
+    );
+
+    fluidCustomParticles = fluidRenderObject.object as FluidRenderingObjectCustomParticles;
+    fluidCustomParticles.particleSize = 0.6;              // larger so particles overlap → cohesive surface
+    fluidCustomParticles.particleThicknessAlpha = 0.1;
+
+    // Configure target renderer for water-like appearance
+    const tr = fluidRenderObject.targetRenderer;
+    tr.fluidColor = new Color3(0.08, 0.35, 0.65);      // ocean blue
+    tr.density = 1.5;                                   // moderate opacity — let scene show through
+    tr.refractionStrength = 0.12;                        // noticeable refraction distortion
+    tr.fresnelClamp = 0.7;                              // strong Fresnel edge brightening
+    tr.specularPower = 200;                              // focused specular highlight
+    tr.minimumThickness = 0.0;
+    tr.dirLight = new Vector3(-2, -1, 1).normalize();
+
+    // Depth bilateral blur — makes depth surface smooth
+    tr.enableBlurDepth = true;
+    tr.blurDepthSizeDivisor = 1;
+    tr.blurDepthFilterSize = 15;                        // wide blur for smooth surface
+    tr.blurDepthNumIterations = 5;                      // more passes → smoother
+    tr.blurDepthMaxFilterSize = 150;
+    tr.blurDepthDepthScale = 10;
+
+    // Thickness blur — smooth density map
+    tr.enableBlurThickness = true;
+    tr.blurThicknessSizeDivisor = 1;
+    tr.blurThicknessFilterSize = 10;
+    tr.blurThicknessNumIterations = 3;
+
+    tr.useFixedThickness = false;
+    tr.useVelocity = false;
+  }
+
+  function disableFluidRendering() {
+    if (fluidRenderObject && fluidRenderer) {
+      fluidRenderer.removeRenderObject(fluidRenderObject, true);
+      fluidRenderObject = null;
+      fluidCustomParticles = null;
+    }
+    if (fluidRenderer) {
+      scene.disableFluidRenderer();
+      fluidRenderer = null;
+    }
+    fluidPositions = new Float32Array(0);
+  }
+
   // SPS particles
   let sps: SolidParticleSystem | null = null;
   let spsMesh: Mesh | null = null;
@@ -260,7 +374,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
           const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
           let cr: number, cg: number, cb: number;
           if (mode === 'off') {
-            [cr, cg, cb] = FLAT_BLUE;
+            [cr, cg, cb] = FLAT_COLOR;
           } else {
             const [vx, vy, vz] = velocity(x, y, z, currentParams);
             const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
@@ -280,15 +394,23 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   initParticlePhases();
   buildSPS();
 
+  // Enable fluid rendering if starting in water mode
+  if (currentParams.fluid === 'water') {
+    const totalParticles = paths.length * particlesPerLine;
+    enableFluidRendering(totalParticles);
+    if (spsMesh) spsMesh.setEnabled(false);
+  }
+
   // Animation
   scene.onBeforeRenderObservable.add(() => {
     const dt = engine.getDeltaTime() / 1000;
-    if (!sps || !spsMesh || paths.length === 0) return;
+    if (paths.length === 0) return;
 
     const U = currentParams.uFreestream;
     const mode = currentParams.zoneMode;
     const speed = U * 0.15;
     const totalParticles = paths.length * particlesPerLine;
+    const isWater = currentParams.fluid === 'water';
 
     for (let i = 0; i < totalParticles; i++) {
       phases[i] = (phases[i] + speed * dt) % 1.0;
@@ -297,38 +419,72 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
 
       const t = phases[i];
       const [x, y, z] = samplePath(paths[lineIdx], t);
-      const p = sps.particles[i];
-      p.position.set(x, y, z);
 
-      let cr: number, cg: number, cb: number;
-      if (mode === 'off') {
-        [cr, cg, cb] = FLAT_BLUE;
-      } else {
-        const [vx, vy, vz] = velocity(x, y, z, currentParams);
-        const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
-        [cr, cg, cb] = mode === 'speed' ? speedColor(vMag, U) : pressureColor(vMag, U);
+      // Update fluid renderer position buffer (water mode)
+      if (isWater && fluidPositions.length >= (i + 1) * 3) {
+        const off = i * 3;
+        fluidPositions[off] = x;
+        fluidPositions[off + 1] = y;
+        fluidPositions[off + 2] = z;
       }
-      const fadeIn = Math.min(t * 8.0, 1.0);
-      const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
-      if (!p.color) {
-        p.color = new Color4(cr, cg, cb, fadeIn * fadeOut);
-      } else {
-        p.color.r = cr; p.color.g = cg; p.color.b = cb;
-        p.color.a = fadeIn * fadeOut;
+
+      // Update SPS particles (air mode — or always for position tracking)
+      if (!isWater && sps && spsMesh) {
+        const p = sps.particles[i];
+        p.position.set(x, y, z);
+
+        let cr: number, cg: number, cb: number;
+        if (mode === 'off') {
+          [cr, cg, cb] = FLAT_COLOR;
+        } else {
+          const [vx, vy, vz] = velocity(x, y, z, currentParams);
+          const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
+          [cr, cg, cb] = mode === 'speed' ? speedColor(vMag, U) : pressureColor(vMag, U);
+        }
+        const fadeIn = Math.min(t * 8.0, 1.0);
+        const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
+        if (!p.color) {
+          p.color = new Color4(cr, cg, cb, fadeIn * fadeOut);
+        } else {
+          p.color.r = cr; p.color.g = cg; p.color.b = cb;
+          p.color.a = fadeIn * fadeOut;
+        }
       }
     }
 
-    sps.setParticles();
+    // Update fluid renderer buffers each frame
+    if (isWater && fluidCustomParticles) {
+      fluidCustomParticles.addBuffers({ position: fluidPositions });
+      fluidCustomParticles.setNumParticles(totalParticles);
+    }
+
+    if (!isWater && sps && spsMesh) {
+      sps.setParticles();
+    }
   });
 
   function rebuild(params: SimParams) {
     currentParams = { ...params };
+    applyFluidTheme();
     streamlineData = computeStreamlines3D({ ...currentParams, numStreamlines: STREAMLINE_GRID * STREAMLINE_GRID });
     paths = buildPathLookup(streamlineData);
     createSphere();
     buildZones();
     initParticlePhases();
     buildSPS();
+
+    const isWater = currentParams.fluid === 'water';
+    const totalParticles = paths.length * particlesPerLine;
+
+    if (isWater) {
+      // Enable fluid rendering, hide SPS
+      enableFluidRendering(totalParticles);
+      if (spsMesh) spsMesh.setEnabled(false);
+    } else {
+      // Disable fluid rendering, show SPS
+      disableFluidRendering();
+      if (spsMesh) spsMesh.setEnabled(true);
+    }
   }
 
   return { scene, rebuild };

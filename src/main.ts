@@ -1,5 +1,4 @@
 import './style.css';
-import { WebGPUEngine } from '@babylonjs/core/Engines/webgpuEngine';
 import { Engine } from '@babylonjs/core/Engines/engine';
 import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine';
 import { createBabylonScene } from './scene/createScene';
@@ -13,23 +12,9 @@ declare global {
   }
 }
 
-async function createEngine(canvas: HTMLCanvasElement): Promise<AbstractEngine> {
-  // Try WebGPU first
-  if (navigator.gpu) {
-    try {
-      const webgpuEngine = new WebGPUEngine(canvas, {
-        adaptToDeviceRatio: true,
-        antialias: true,
-      });
-      await webgpuEngine.initAsync();
-      console.log('Using WebGPU engine');
-      return webgpuEngine;
-    } catch (e) {
-      console.warn('WebGPU init failed, falling back to WebGL2:', e);
-    }
-  }
-
-  // WebGL2 fallback
+function createEngine(canvas: HTMLCanvasElement): AbstractEngine {
+  // Use WebGL2 — FluidRenderer WGSL shaders have bugs in Babylon v8.52,
+  // so WebGL2/GLSL is more reliable for screen-space fluid rendering.
   const glEngine = new Engine(canvas, true, { adaptToDeviceRatio: true }, true);
   console.log('Using WebGL2 engine');
   return glEngine;
@@ -41,7 +26,7 @@ async function main() {
 
   let engine: AbstractEngine;
   try {
-    engine = await createEngine(canvas);
+    engine = createEngine(canvas);
   } catch {
     noWebGPU.style.display = 'flex';
     canvas.style.display = 'none';

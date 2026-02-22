@@ -4,6 +4,7 @@
  */
 
 export type ZoneMode = 'off' | 'pressure' | 'speed';
+export type FluidType = 'air' | 'water';
 
 export interface SimParams {
   uFreestream: number;
@@ -12,6 +13,7 @@ export interface SimParams {
   numStreamlines: number;
   wakeEnabled: boolean;
   zoneMode: ZoneMode;
+  fluid: FluidType;
 }
 
 export const DEFAULT_PARAMS: SimParams = {
@@ -21,6 +23,7 @@ export const DEFAULT_PARAMS: SimParams = {
   numStreamlines: 5000,
   wakeEnabled: true,
   zoneMode: 'pressure',
+  fluid: 'air',
 };
 
 const DOMAIN_MIN: [number, number, number] = [-4, -3, -3];
@@ -31,9 +34,14 @@ const MAX_STEPS = 2000;
 
 type Vec3 = [number, number, number];
 
+// Kinematic viscosity ratio: water Re is ~15x higher than air at same speed/size,
+// so wake effects are much stronger in water.
+const FLUID_WAKE_SCALE: Record<FluidType, number> = { air: 1.0, water: 3.0 };
+
 /** 3D potential flow velocity around a sphere + optional wake */
 export function velocity(x: number, y: number, z: number, params: SimParams): Vec3 {
-  const { uFreestream: U, sphereRadius: R, gamma, wakeEnabled } = params;
+  const { uFreestream: U, sphereRadius: R, wakeEnabled, fluid } = params;
+  const gamma = params.gamma * FLUID_WAKE_SCALE[fluid];
   const r2 = x * x + y * y + z * z;
 
   if (r2 < 0.01) return [U, 0, 0]; // avoid singularity at origin

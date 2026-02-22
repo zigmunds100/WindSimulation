@@ -121,6 +121,29 @@ export function createControls(
   selectRow.appendChild(select);
   panel.appendChild(selectRow);
 
+  // --- Fluid type dropdown ---
+  const fluidRow = document.createElement('div');
+  fluidRow.className = 'cp-row';
+  const fluidLabel = document.createElement('label');
+  fluidLabel.className = 'cp-label';
+  fluidLabel.textContent = 'Fluid';
+  const fluidSelect = document.createElement('select');
+  fluidSelect.className = 'cp-select';
+  for (const f of [['air', 'Air'], ['water', 'Water']] as const) {
+    const opt = document.createElement('option');
+    opt.value = f[0];
+    opt.textContent = f[1];
+    if (f[0] === params.fluid) opt.selected = true;
+    fluidSelect.appendChild(opt);
+  }
+  fluidSelect.addEventListener('change', () => {
+    params.fluid = fluidSelect.value as SimParams['fluid'];
+    scheduleUpdate();
+  });
+  fluidRow.appendChild(fluidLabel);
+  fluidRow.appendChild(fluidSelect);
+  panel.appendChild(fluidRow);
+
   // --- Zone mode dropdown ---
   const zoneRow = document.createElement('div');
   zoneRow.className = 'cp-row';
@@ -179,6 +202,7 @@ export function createControls(
     gammaSlider.input.value = String(params.gamma);
     gammaSlider.valSpan.textContent = params.gamma.toFixed(1);
     select.value = String(params.numStreamlines);
+    fluidSelect.value = params.fluid;
     zoneSelect.value = params.zoneMode;
     checkbox.checked = params.wakeEnabled;
     callbacks.onReset();
