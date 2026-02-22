@@ -218,19 +218,23 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   function applyFluidTheme() {
     const isWater = currentParams.fluid === 'water';
     if (isWater) {
-      scene.clearColor = new Color4(0.14, 0.24, 0.38, 1);
-      hemiLight.diffuse = new Color3(0.7, 0.85, 1.0);
-      hemiLight.groundColor = new Color3(0.15, 0.2, 0.3);
-      pointLight.diffuse = new Color3(0.8, 0.9, 1.0);
-      sphereMat.albedoColor = new Color3(0.8, 0.85, 0.9);
-      sphereMat.metallic = 0.15;
-      sphereMat.roughness = 0.3;
+      scene.clearColor = new Color4(0.53, 0.76, 0.98, 1);  // bright sky blue
+      hemiLight.diffuse = new Color3(1.0, 0.97, 0.9);       // warm sunlight
+      hemiLight.intensity = 0.9;
+      hemiLight.groundColor = new Color3(0.35, 0.45, 0.55);
+      pointLight.diffuse = new Color3(1.0, 0.95, 0.85);     // warm sun
+      pointLight.intensity = 1.2;
+      sphereMat.albedoColor = new Color3(0.9, 0.92, 0.95);
+      sphereMat.metallic = 0.1;
+      sphereMat.roughness = 0.25;
       FLAT_COLOR = [0.15, 0.55, 0.75];
     } else {
       scene.clearColor = new Color4(0.12, 0.12, 0.14, 1);
       hemiLight.diffuse = new Color3(0.9, 0.9, 1.0);
+      hemiLight.intensity = 0.6;
       hemiLight.groundColor = new Color3(0.3, 0.3, 0.35);
       pointLight.diffuse = new Color3(1, 0.95, 0.9);
+      pointLight.intensity = 0.8;
       sphereMat.albedoColor = new Color3(0.95, 0.95, 0.95);
       sphereMat.metallic = 0.05;
       sphereMat.roughness = 0.45;
