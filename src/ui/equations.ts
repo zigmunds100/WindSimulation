@@ -49,23 +49,6 @@ export function createEquations() {
     </div>
 
     <div class="eq-section">
-      <div class="eq-heading">Pressure Coefficient (Isosurfaces)</div>
-      <div class="eq-block">
-        <span class="eq-label">V<sub>r</sub> =</span>
-        <span class="eq-math">U(1 &minus; a&sup3;/r&sup3;) cos&theta;</span>
-      </div>
-      <div class="eq-block">
-        <span class="eq-label">V<sub>&theta;</sub> =</span>
-        <span class="eq-math">&minus;U(1 + a&sup3;/2r&sup3;) sin&theta;</span>
-      </div>
-      <div class="eq-block">
-        <span class="eq-label">C<sub>p</sub> =</span>
-        <span class="eq-math">1 &minus; (V<sub>r</sub>&sup2; + V<sub>&theta;</sub>&sup2;) / U&sup2;</span>
-      </div>
-      <div class="eq-note">Bernoulli: C<sub>p</sub> = +1 at stagnation, &minus;1.25 at equator; isosurfaces at C<sub>p</sub> = 0.6, 0, &minus;0.8</div>
-    </div>
-
-    <div class="eq-section">
       <div class="eq-heading">4th-Order Runge-Kutta Integration</div>
       <div class="eq-block">
         <span class="eq-math">

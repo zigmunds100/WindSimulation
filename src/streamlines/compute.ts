@@ -3,7 +3,6 @@
  * for 3D potential flow around a sphere.
  */
 
-export type ZoneMode = 'off' | 'pressure' | 'speed';
 export type FluidType = 'air' | 'water';
 
 export interface SimParams {
@@ -12,7 +11,6 @@ export interface SimParams {
   gamma: number;
   numStreamlines: number;
   wakeEnabled: boolean;
-  zoneMode: ZoneMode;
   fluid: FluidType;
 }
 
@@ -22,7 +20,6 @@ export const DEFAULT_PARAMS: SimParams = {
   gamma: 0.5,
   numStreamlines: 5000,
   wakeEnabled: true,
-  zoneMode: 'pressure',
   fluid: 'water',
 };
 

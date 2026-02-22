@@ -10,7 +10,6 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine';
 import type { SolidParticle } from '@babylonjs/core/Particles/solidParticle';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { createPressureIsosurfaces, type PressureIsosurfaceSystem } from '../visuals/pressureIsosurfaces';
 
 // Screen-space fluid rendering — register scene.enableFluidRenderer + all GLSL shaders
 import '@babylonjs/core/Rendering/fluidRenderer/fluidRenderer';
@@ -25,7 +24,7 @@ import '@babylonjs/core/Shaders/fluidRenderingStandardBlur.fragment';
 import '@babylonjs/core/Shaders/fluidRenderingRender.fragment';
 import { FluidRenderingObjectCustomParticles } from '@babylonjs/core/Rendering/fluidRenderer/fluidRenderingObjectCustomParticles';
 import type { FluidRenderer, IFluidRenderingRenderObject } from '@babylonjs/core/Rendering/fluidRenderer/fluidRenderer';
-import { computeStreamlines3D, velocity, DEFAULT_PARAMS, type SimParams, type StreamlineData3D } from '../streamlines/compute';
+import { computeStreamlines3D, DEFAULT_PARAMS, type SimParams, type StreamlineData3D } from '../streamlines/compute';
 
 /** Fixed streamline grid density — always compute this many paths */
 const STREAMLINE_GRID = 14; // 14x14 = 196 streamlines
@@ -83,36 +82,8 @@ function samplePath(path: PathLookup, t: number): [number, number, number] {
   ];
 }
 
-/** Pressure coloring: blue (high P / stagnation) → white (ambient) → red (low P / fast) */
-function pressureColor(vMag: number, U: number): [number, number, number] {
-  const ratio = vMag / U;
-  const cp = 1 - ratio * ratio;
-  const t = Math.max(0, Math.min(1, (1 - cp) / 2));
-  if (t < 0.5) {
-    const s = t * 2;
-    return [s, s, 1]; // blue → white
-  } else {
-    const s = (t - 0.5) * 2;
-    return [1, 1 - s, 1 - s]; // white → red
-  }
-}
-
-/** Speed coloring: cyan (slow) → white (ambient) → yellow/orange (fast) */
-function speedColor(vMag: number, U: number): [number, number, number] {
-  const ratio = vMag / U;
-  // Map: 0 = stalled, 1 = freestream, >1 = accelerated
-  const t = Math.max(0, Math.min(1, ratio / 2)); // 0=stopped, 0.5=freestream, 1=2x freestream
-  if (t < 0.5) {
-    const s = t * 2; // 0..1
-    return [s, 1, 1]; // cyan → white
-  } else {
-    const s = (t - 0.5) * 2; // 0..1
-    return [1, 1 - s * 0.6, 1 - s]; // white → orange
-  }
-}
-
-/** Flat color for "off" mode — set per fluid */
-let FLAT_COLOR: [number, number, number] = [0.122, 0.467, 0.706];
+/** Particle color — set per fluid */
+let PARTICLE_COLOR: [number, number, number] = [0.122, 0.467, 0.706];
 
 export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasElement) {
   const scene = new Scene(engine);
@@ -156,9 +127,6 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   }
   createSphere();
 
-  // ── Pressure isosurface system ──
-  let isoSystem: PressureIsosurfaceSystem = createPressureIsosurfaces(scene, currentParams);
-
   // ── Fluid theme ──
   function applyFluidTheme() {
     const isWater = currentParams.fluid === 'water';
@@ -172,7 +140,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
       sphereMat.albedoColor = new Color3(0.9, 0.92, 0.95);
       sphereMat.metallic = 0.1;
       sphereMat.roughness = 0.25;
-      FLAT_COLOR = [0.15, 0.55, 0.75];
+      PARTICLE_COLOR = [0.15, 0.55, 0.75];
     } else {
       scene.clearColor = new Color4(0.12, 0.12, 0.14, 1);
       hemiLight.diffuse = new Color3(0.9, 0.9, 1.0);
@@ -183,7 +151,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
       sphereMat.albedoColor = new Color3(0.95, 0.95, 0.95);
       sphereMat.metallic = 0.05;
       sphereMat.roughness = 0.45;
-      FLAT_COLOR = [0.122, 0.467, 0.706];
+      PARTICLE_COLOR = [0.122, 0.467, 0.706];
     }
   }
   applyFluidTheme();
@@ -192,17 +160,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   let fluidRenderer: FluidRenderer | null = null;
   let fluidRenderObject: IFluidRenderingRenderObject | null = null;
   let fluidPositions: Float32Array = new Float32Array(0);
-  let fluidColors: Float32Array = new Float32Array(0);
   let fluidCustomParticles: FluidRenderingObjectCustomParticles | null = null;
-
-  function getParticleColor(x: number, y: number, z: number, mode: SimParams['zoneMode'], U: number): [number, number, number] {
-    if (mode === 'off') {
-      return FLAT_COLOR;
-    }
-    const [vx, vy, vz] = velocity(x, y, z, currentParams);
-    const vMag = Math.sqrt(vx * vx + vy * vy + vz * vz);
-    return mode === 'speed' ? speedColor(vMag, U) : pressureColor(vMag, U);
-  }
 
   function enableFluidRendering(totalParticles: number) {
     disableFluidRendering();
@@ -211,10 +169,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     if (!fluidRenderer) return;
 
     fluidPositions = new Float32Array(totalParticles * 3);
-    fluidColors = new Float32Array(totalParticles * 4);
     // Initialize positions from current phases so first frame isn't blank
-    const U = currentParams.uFreestream;
-    const mode = currentParams.zoneMode;
     for (let i = 0; i < totalParticles; i++) {
       const lineIdx = Math.floor(i / particlesPerLine);
       if (lineIdx < paths.length) {
@@ -223,19 +178,13 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
         fluidPositions[i * 3] = x;
         fluidPositions[i * 3 + 1] = y;
         fluidPositions[i * 3 + 2] = z;
-        const [cr, cg, cb] = getParticleColor(x, y, z, mode, U);
-        const colorOffset = i * 4;
-        fluidColors[colorOffset] = cr;
-        fluidColors[colorOffset + 1] = cg;
-        fluidColors[colorOffset + 2] = cb;
-        fluidColors[colorOffset + 3] = 1;
       }
     }
 
     fluidRenderObject = fluidRenderer.addCustomParticles(
-      { position: fluidPositions, color: fluidColors },
+      { position: fluidPositions },
       totalParticles,
-      true, // generate diffuse texture so speed/pressure zone colors can tint the water body
+      false,
     );
 
     fluidCustomParticles = fluidRenderObject.object as FluidRenderingObjectCustomParticles;
@@ -244,8 +193,8 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
 
     // Configure target renderer for water-like appearance
     const tr = fluidRenderObject.targetRenderer;
-    tr.fluidColor = mode === 'off' ? new Color3(0.15, 0.45, 0.75) : new Color3(1, 1, 1);
-    tr.density = 1.2;                                   // lighter opacity — more translucent
+    tr.fluidColor = new Color3(0.15, 0.45, 0.75);
+    tr.density = 0.8;                                    // lighter opacity — reduce dark halo
     tr.refractionStrength = 0.12;                        // noticeable refraction distortion
     tr.fresnelClamp = 0.7;                              // strong Fresnel edge brightening
     tr.specularPower = 200;                              // focused specular highlight
@@ -255,10 +204,10 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     // Depth bilateral blur — makes depth surface smooth
     tr.enableBlurDepth = true;
     tr.blurDepthSizeDivisor = 1;
-    tr.blurDepthFilterSize = 15;                        // wide blur for smooth surface
-    tr.blurDepthNumIterations = 5;                      // more passes → smoother
-    tr.blurDepthMaxFilterSize = 150;
-    tr.blurDepthDepthScale = 10;
+    tr.blurDepthFilterSize = 20;                        // wider blur to soften sphere edge
+    tr.blurDepthNumIterations = 7;                      // more passes → smoother
+    tr.blurDepthMaxFilterSize = 200;
+    tr.blurDepthDepthScale = 15;
 
     // Thickness blur — smooth density map
     tr.enableBlurThickness = true;
@@ -281,7 +230,6 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
       fluidRenderer = null;
     }
     fluidPositions = new Float32Array(0);
-    fluidColors = new Float32Array(0);
   }
 
   // SPS particles
@@ -328,10 +276,9 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     spsMesh.material = particleMat;
     spsMesh.hasVertexAlpha = true;
 
-    // Initial positions with mode-aware coloring
+    // Initial positions
     sps.initParticles = () => {
-      const U = currentParams.uFreestream;
-      const mode = currentParams.zoneMode;
+      const [cr, cg, cb] = PARTICLE_COLOR;
       for (let i = 0; i < totalParticles; i++) {
         const p = sps!.particles[i];
         const lineIdx = Math.floor(i / particlesPerLine);
@@ -341,7 +288,6 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
           p.position.set(x, y, z);
           const fadeIn = Math.min(t * 8.0, 1.0);
           const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
-          const [cr, cg, cb] = getParticleColor(x, y, z, mode, U);
           p.color = new Color4(cr, cg, cb, fadeIn * fadeOut);
         }
       }
@@ -369,7 +315,6 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     if (paths.length === 0) return;
 
     const U = currentParams.uFreestream;
-    const mode = currentParams.zoneMode;
     const speed = U * 0.15;
     const totalParticles = paths.length * particlesPerLine;
     const isWater = currentParams.fluid === 'water';
@@ -388,23 +333,14 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
         fluidPositions[off] = x;
         fluidPositions[off + 1] = y;
         fluidPositions[off + 2] = z;
-
-        if (fluidColors.length >= (i + 1) * 4) {
-          const [cr, cg, cb] = getParticleColor(x, y, z, mode, U);
-          const colorOffset = i * 4;
-          fluidColors[colorOffset] = cr;
-          fluidColors[colorOffset + 1] = cg;
-          fluidColors[colorOffset + 2] = cb;
-          fluidColors[colorOffset + 3] = 1;
-        }
       }
 
-      // Update SPS particles (air mode — or always for position tracking)
+      // Update SPS particles (air mode)
       if (!isWater && sps && spsMesh) {
         const p = sps.particles[i];
         p.position.set(x, y, z);
 
-        const [cr, cg, cb] = getParticleColor(x, y, z, mode, U);
+        const [cr, cg, cb] = PARTICLE_COLOR;
         const fadeIn = Math.min(t * 8.0, 1.0);
         const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
         if (!p.color) {
@@ -418,11 +354,8 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
 
     // Update fluid renderer buffers each frame
     if (isWater && fluidCustomParticles) {
-      fluidCustomParticles.addBuffers({ position: fluidPositions, color: fluidColors });
+      fluidCustomParticles.addBuffers({ position: fluidPositions });
       fluidCustomParticles.setNumParticles(totalParticles);
-      if (fluidRenderObject) {
-        fluidRenderObject.targetRenderer.fluidColor = mode === 'off' ? new Color3(0.15, 0.45, 0.75) : new Color3(1, 1, 1);
-      }
     }
 
     if (!isWater && sps && spsMesh) {
@@ -436,7 +369,6 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     streamlineData = computeStreamlines3D({ ...currentParams, numStreamlines: STREAMLINE_GRID * STREAMLINE_GRID });
     paths = buildPathLookup(streamlineData);
     createSphere();
-    isoSystem.rebuild(currentParams);
     initParticlePhases();
     buildSPS();
 
@@ -444,7 +376,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     const totalParticles = paths.length * particlesPerLine;
 
     if (isWater) {
-      // Enable fluid rendering, hide SPS
+      // Enable fluid rendering, hide SPS and sphere
       enableFluidRendering(totalParticles);
       if (spsMesh) spsMesh.setEnabled(false);
     } else {
