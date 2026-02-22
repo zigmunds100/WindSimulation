@@ -25,6 +25,9 @@ import '@babylonjs/core/Shaders/fluidRenderingRender.fragment';
 import { FluidRenderingObjectCustomParticles } from '@babylonjs/core/Rendering/fluidRenderer/fluidRenderingObjectCustomParticles';
 import type { FluidRenderer, IFluidRenderingRenderObject } from '@babylonjs/core/Rendering/fluidRenderer/fluidRenderer';
 import { computeStreamlines3D, DEFAULT_PARAMS, type SimParams, type StreamlineData3D } from '../streamlines/compute';
+import { buildPressureUniforms } from '../pressureViz/pressureModel';
+import { SurfacePressureViz } from '../pressureViz/surfacePressure';
+import { PressureSlicesViz } from '../pressureViz/pressureSlices';
 
 /** Fixed streamline grid density — always compute this many paths */
 const STREAMLINE_GRID = 14; // 14x14 = 196 streamlines
@@ -119,11 +122,26 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   sphereMat.albedoColor = new Color3(0.95, 0.95, 0.95);
   sphereMat.metallic = 0.05;
   sphereMat.roughness = 0.45;
+  const surfacePressureViz = new SurfacePressureViz(scene);
+  const pressureSlicesViz = new PressureSlicesViz(scene);
+
+  function updatePressureViz() {
+    const uniforms = buildPressureUniforms(currentParams, sphereMesh?.position ?? Vector3.Zero());
+    surfacePressureViz.update(uniforms);
+    pressureSlicesViz.update(uniforms);
+    pressureSlicesViz.setEnabled(currentParams.pressureSlicesEnabled);
+
+    if (currentParams.pressureSurfaceEnabled) {
+      surfacePressureViz.attachToSphere(sphereMesh);
+    } else {
+      sphereMesh.material = sphereMat;
+    }
+  }
 
   function createSphere() {
     if (sphereMesh) sphereMesh.dispose();
     sphereMesh = MeshBuilder.CreateSphere('sphere', { diameter: currentParams.sphereRadius * 2, segments: 32 }, scene);
-    sphereMesh.material = sphereMat;
+    updatePressureViz();
   }
   createSphere();
 
@@ -301,6 +319,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
 
   initParticlePhases();
   buildSPS();
+  updatePressureViz();
 
   // Enable fluid rendering if starting in water mode
   if (currentParams.fluid === 'water') {
@@ -371,6 +390,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     createSphere();
     initParticlePhases();
     buildSPS();
+    updatePressureViz();
 
     const isWater = currentParams.fluid === 'water';
     const totalParticles = paths.length * particlesPerLine;
