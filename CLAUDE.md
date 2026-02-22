@@ -1,6 +1,6 @@
 # Project: Visual match loop
 
-Goal: match the reference image in reference/target.png by iterating on the WebGL scene.
+Goal: match the reference image in reference/target.png by iterating on the WebGPU scene.
 
 Rules:
 - Use a two-subagent loop: checker -> builder -> render -> checker...

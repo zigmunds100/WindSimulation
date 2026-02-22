@@ -1,0 +1,21 @@
+{
+  "name": "windsimulation",
+  "version": "1.0.0",
+  "description": "WebGPU wind tunnel simulation",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "screenshot": "tsx tools/screenshot.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@webgpu/types": "^0.1.69",
+    "playwright": "^1.58.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

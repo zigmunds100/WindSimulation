@@ -2,7 +2,21 @@
   "permissions": {
     "allow": [
       "Bash(git status:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(node --version:*)",
+      "Bash(npm --version:*)",
+      "Bash(where:*)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(npx playwright install:*)",
+      "Bash(npx vite build)",
+      "Bash(curl:*)",
+      "Bash(npx tsx:*)",
+      "Bash(cd:*)",
+      "Bash(cd /c/Users/admin/source/WindSimulation && npx tsc --noEmit 2>&1)",
+      "Bash(true:*)",
+      "Bash(start:*)"
     ]
   }
 }
