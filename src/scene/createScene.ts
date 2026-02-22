@@ -10,6 +10,7 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine';
 import type { SolidParticle } from '@babylonjs/core/Particles/solidParticle';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { createPressureIsosurfaces, type PressureIsosurfaceSystem } from '../visuals/pressureIsosurfaces';
 
 // Screen-space fluid rendering — register scene.enableFluidRenderer + all GLSL shaders
 import '@babylonjs/core/Rendering/fluidRenderer/fluidRenderer';
@@ -155,64 +156,8 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
   }
   createSphere();
 
-  // ── Zone meshes (pressure or speed mode) ──
-  // Stagnation zones: ellipsoids at front/back
-  // Equator zone: torus where flow is fastest
-  const stagnationMat = new StandardMaterial('stagnationMat', scene);
-  stagnationMat.alpha = 0.25;
-  stagnationMat.backFaceCulling = false;
-
-  const equatorMat = new StandardMaterial('equatorMat', scene);
-  equatorMat.alpha = 0.2;
-  equatorMat.backFaceCulling = false;
-
-  function updateZoneMaterials() {
-    if (currentParams.zoneMode === 'speed') {
-      // Speed: cyan (slow) at stagnation, orange (fast) at equator
-      stagnationMat.diffuseColor = new Color3(0.0, 0.8, 0.9);
-      stagnationMat.emissiveColor = new Color3(0.0, 0.3, 0.4);
-      equatorMat.diffuseColor = new Color3(1.0, 0.6, 0.1);
-      equatorMat.emissiveColor = new Color3(0.5, 0.25, 0.0);
-    } else {
-      // Pressure: blue (high P) at stagnation, red (low P) at equator
-      stagnationMat.diffuseColor = new Color3(0.3, 0.5, 1.0);
-      stagnationMat.emissiveColor = new Color3(0.1, 0.2, 0.6);
-      equatorMat.diffuseColor = new Color3(1.0, 0.35, 0.2);
-      equatorMat.emissiveColor = new Color3(0.5, 0.1, 0.05);
-    }
-  }
-  updateZoneMaterials();
-
-  let zoneMeshes: Mesh[] = [];
-
-  function buildZones() {
-    for (const m of zoneMeshes) m.dispose();
-    zoneMeshes = [];
-
-    if (currentParams.zoneMode === 'off') return;
-
-    updateZoneMaterials();
-    const R = currentParams.sphereRadius;
-
-    // Front stagnation ellipsoid
-    const frontHi = MeshBuilder.CreateSphere('zoneFront', { diameterX: R * 1.2, diameterY: R * 1.8, diameterZ: R * 1.8, segments: 16 }, scene);
-    frontHi.position = new Vector3(-R * 1.3, 0, 0);
-    frontHi.material = stagnationMat;
-    zoneMeshes.push(frontHi);
-
-    // Back stagnation ellipsoid
-    const backHi = MeshBuilder.CreateSphere('zoneBack', { diameterX: R * 1.2, diameterY: R * 1.8, diameterZ: R * 1.8, segments: 16 }, scene);
-    backHi.position = new Vector3(R * 1.3, 0, 0);
-    backHi.material = stagnationMat;
-    zoneMeshes.push(backHi);
-
-    // Equator torus
-    const loRing = MeshBuilder.CreateTorus('zoneEquator', { diameter: R * 2.6, thickness: R * 1.0, tessellation: 32 }, scene);
-    loRing.rotation = new Vector3(0, 0, Math.PI / 2);
-    loRing.material = equatorMat;
-    zoneMeshes.push(loRing);
-  }
-  buildZones();
+  // ── Pressure isosurface system ──
+  let isoSystem: PressureIsosurfaceSystem = createPressureIsosurfaces(scene, currentParams);
 
   // ── Fluid theme ──
   function applyFluidTheme() {
@@ -473,7 +418,7 @@ export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasEle
     streamlineData = computeStreamlines3D({ ...currentParams, numStreamlines: STREAMLINE_GRID * STREAMLINE_GRID });
     paths = buildPathLookup(streamlineData);
     createSphere();
-    buildZones();
+    isoSystem.rebuild(currentParams);
     initParticlePhases();
     buildSPS();
 

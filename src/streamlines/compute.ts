@@ -23,7 +23,7 @@ export const DEFAULT_PARAMS: SimParams = {
   numStreamlines: 5000,
   wakeEnabled: true,
   zoneMode: 'pressure',
-  fluid: 'air',
+  fluid: 'water',
 };
 
 const DOMAIN_MIN: [number, number, number] = [-4, -3, -3];
