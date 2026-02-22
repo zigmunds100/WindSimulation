@@ -11,10 +11,11 @@ export interface ControlCallbacks {
   onPauseToggle: (paused: boolean) => void;
 }
 
-const STREAMLINE_PRESETS: { label: string; value: number }[] = [
-  { label: '10k', value: 20 },
-  { label: '20k', value: 40 },
-  { label: '50k', value: 80 },
+const PARTICLE_PRESETS: { label: string; value: number }[] = [
+  { label: '5k', value: 5000 },
+  { label: '10k', value: 10000 },
+  { label: '20k', value: 20000 },
+  { label: '50k', value: 50000 },
 ];
 
 export function createControls(
@@ -105,7 +106,7 @@ export function createControls(
   selectLabel.textContent = 'Particles';
   const select = document.createElement('select');
   select.className = 'cp-select';
-  for (const preset of STREAMLINE_PRESETS) {
+  for (const preset of PARTICLE_PRESETS) {
     const opt = document.createElement('option');
     opt.value = String(preset.value);
     opt.textContent = preset.label;

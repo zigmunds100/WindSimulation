@@ -7,14 +7,10 @@
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-  <div id="axes-overlay">
-    <div id="plot-area">
-      <canvas id="canvas"></canvas>
-    </div>
-  </div>
+  <canvas id="canvas"></canvas>
   <div id="no-webgpu" style="display:none;">
-    <h1>WebGPU not supported</h1>
-    <p>Please use Chrome 113+ or Edge 113+ with WebGPU enabled.</p>
+    <h1>WebGPU / WebGL not supported</h1>
+    <p>Please use a modern browser with WebGPU or WebGL2 support.</p>
   </div>
   <script type="module" src="/src/main.ts"></script>
 </body>

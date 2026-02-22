@@ -1,49 +1,58 @@
-import { createSphereRenderer } from '../engine/render';
-import { createStreamlineRenderer } from '../engine/streamlineRenderer';
-import { createArrowRenderer } from '../engine/arrowRenderer';
-import { createParticleRenderer } from '../engine/particleRenderer';
-import { computeStreamlines, DEFAULT_PARAMS, type SimParams, type StreamlineData } from '../streamlines/compute';
+import { Scene } from '@babylonjs/core/scene';
+import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
+import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
+import { PointLight } from '@babylonjs/core/Lights/pointLight';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { Vector3, Color3, Color4 } from '@babylonjs/core/Maths/math';
+import { PBRMaterial } from '@babylonjs/core/Materials/PBR';
+import { SolidParticleSystem } from '@babylonjs/core/Particles/solidParticleSystem';
+import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import type { AbstractEngine } from '@babylonjs/core/Engines/abstractEngine';
+import type { SolidParticle } from '@babylonjs/core/Particles/solidParticle';
+import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 
-const PARTICLES_PER_LINE = 12;
+import { computeStreamlines3D, DEFAULT_PARAMS, type SimParams, type StreamlineData3D } from '../streamlines/compute';
 
-/** Build a lookup table for quick arc-length interpolation along each streamline */
-function buildPathLookup(data: StreamlineData) {
-  const paths: Array<{ xs: Float64Array; ys: Float64Array; cumLen: Float64Array; totalLen: number }> = [];
+/** Fixed streamline grid density — always compute this many paths */
+const STREAMLINE_GRID = 14; // 14x14 = 196 streamlines
 
+interface PathLookup {
+  xs: Float64Array;
+  ys: Float64Array;
+  zs: Float64Array;
+  cumLen: Float64Array;
+  totalLen: number;
+}
+
+function buildPathLookup(data: StreamlineData3D): PathLookup[] {
+  const paths: PathLookup[] = [];
   for (const seg of data.segments) {
     const count = seg.count;
     if (count < 2) continue;
-
     const xs = new Float64Array(count);
     const ys = new Float64Array(count);
+    const zs = new Float64Array(count);
     const cumLen = new Float64Array(count);
-
     for (let i = 0; i < count; i++) {
-      const idx = (seg.offset + i) * 2;
+      const idx = (seg.offset + i) * 3;
       xs[i] = data.vertices[idx];
       ys[i] = data.vertices[idx + 1];
+      zs[i] = data.vertices[idx + 2];
       if (i > 0) {
         const dx = xs[i] - xs[i - 1];
         const dy = ys[i] - ys[i - 1];
-        cumLen[i] = cumLen[i - 1] + Math.sqrt(dx * dx + dy * dy);
+        const dz = zs[i] - zs[i - 1];
+        cumLen[i] = cumLen[i - 1] + Math.sqrt(dx * dx + dy * dy + dz * dz);
       }
     }
-
-    paths.push({ xs, ys, cumLen, totalLen: cumLen[count - 1] });
+    paths.push({ xs, ys, zs, cumLen, totalLen: cumLen[count - 1] });
   }
-
   return paths;
 }
 
-/** Interpolate position along a path at normalized t (0..1) */
-function samplePath(
-  path: { xs: Float64Array; ys: Float64Array; cumLen: Float64Array; totalLen: number },
-  t: number,
-): [number, number] {
+function samplePath(path: PathLookup, t: number): [number, number, number] {
   const dist = t * path.totalLen;
   const n = path.cumLen.length;
-
-  // Binary search for the segment
   let lo = 0;
   let hi = n - 1;
   while (lo < hi - 1) {
@@ -51,119 +60,165 @@ function samplePath(
     if (path.cumLen[mid] <= dist) lo = mid;
     else hi = mid;
   }
-
   const segLen = path.cumLen[hi] - path.cumLen[lo];
   const frac = segLen > 0 ? (dist - path.cumLen[lo]) / segLen : 0;
-
-  const x = path.xs[lo] + frac * (path.xs[hi] - path.xs[lo]);
-  const y = path.ys[lo] + frac * (path.ys[hi] - path.ys[lo]);
-  return [x, y];
+  return [
+    path.xs[lo] + frac * (path.xs[hi] - path.xs[lo]),
+    path.ys[lo] + frac * (path.ys[hi] - path.ys[lo]),
+    path.zs[lo] + frac * (path.zs[hi] - path.zs[lo]),
+  ];
 }
 
-export function createScene(
-  device: GPUDevice,
-  canvasFormat: GPUTextureFormat,
-  canvas: HTMLCanvasElement,
-) {
+export function createBabylonScene(engine: AbstractEngine, canvas: HTMLCanvasElement) {
+  const scene = new Scene(engine);
+  scene.clearColor = new Color4(0.12, 0.12, 0.14, 1);
+
+  // Camera
+  const camera = new ArcRotateCamera('cam', -Math.PI / 4, Math.PI / 3, 12, Vector3.Zero(), scene);
+  camera.lowerRadiusLimit = 3;
+  camera.upperRadiusLimit = 30;
+  camera.wheelPrecision = 20;
+  camera.attachControl(canvas, true);
+
+  // Lights
+  const hemiLight = new HemisphericLight('hemi', new Vector3(0, 1, 0), scene);
+  hemiLight.intensity = 0.6;
+  hemiLight.diffuse = new Color3(0.9, 0.9, 1.0);
+  hemiLight.groundColor = new Color3(0.3, 0.3, 0.35);
+
+  const pointLight = new PointLight('point', new Vector3(5, 5, 5), scene);
+  pointLight.intensity = 0.8;
+  pointLight.diffuse = new Color3(1, 0.95, 0.9);
+
+  // State
   let currentParams = { ...DEFAULT_PARAMS };
-
-  // Compute streamlines on CPU
-  let streamlineData = computeStreamlines(currentParams);
-
-  // Create renderers
-  let streamlineRenderer = createStreamlineRenderer(device, canvasFormat, streamlineData);
-  let arrowRenderer = createArrowRenderer(device, canvasFormat, streamlineData);
-  const particleRenderer = createParticleRenderer(device, canvasFormat);
-  const sphere = createSphereRenderer(device, canvasFormat);
-
-  // Particle state: phases[i] ∈ [0,1) for each particle
+  let streamlineData = computeStreamlines3D({ ...currentParams, numStreamlines: STREAMLINE_GRID * STREAMLINE_GRID });
   let paths = buildPathLookup(streamlineData);
+  let particlesPerLine = 0;
   let phases: Float64Array;
-  const instanceData = new Float32Array(4096 * 3); // [x, y, alpha] per particle
+
+  // PBR Sphere
+  let sphereMesh: Mesh;
+  const sphereMat = new PBRMaterial('sphereMat', scene);
+  sphereMat.albedoColor = new Color3(0.95, 0.95, 0.95);
+  sphereMat.metallic = 0.05;
+  sphereMat.roughness = 0.45;
+
+  function createSphere() {
+    if (sphereMesh) sphereMesh.dispose();
+    sphereMesh = MeshBuilder.CreateSphere('sphere', { diameter: currentParams.sphereRadius * 2, segments: 32 }, scene);
+    sphereMesh.material = sphereMat;
+  }
+  createSphere();
+
+  // SPS particles
+  let sps: SolidParticleSystem | null = null;
+  let spsMesh: Mesh | null = null;
+  const particleMat = new StandardMaterial('particleMat', scene);
+  particleMat.diffuseColor = new Color3(0.122, 0.467, 0.706); // #1f77b4
+  particleMat.emissiveColor = new Color3(0.08, 0.3, 0.5);
+  particleMat.disableLighting = false;
 
   function initParticlePhases() {
-    const totalParticles = paths.length * PARTICLES_PER_LINE;
-    phases = new Float64Array(totalParticles);
-    for (let i = 0; i < totalParticles; i++) {
-      // Spread particles evenly with some randomness
-      const lineIdx = Math.floor(i / PARTICLES_PER_LINE);
-      const pIdx = i % PARTICLES_PER_LINE;
-      phases[i] = (pIdx / PARTICLES_PER_LINE + (lineIdx * 0.037)) % 1.0;
+    const numPaths = paths.length;
+    if (numPaths === 0) { phases = new Float64Array(0); return; }
+    particlesPerLine = Math.max(1, Math.round(currentParams.numStreamlines / numPaths));
+    const total = numPaths * particlesPerLine;
+    phases = new Float64Array(total);
+    for (let i = 0; i < total; i++) {
+      const lineIdx = Math.floor(i / particlesPerLine);
+      const pIdx = i % particlesPerLine;
+      phases[i] = (pIdx / particlesPerLine + lineIdx * 0.037) % 1.0;
     }
   }
-  initParticlePhases();
 
-  function rebuild(params: SimParams) {
-    currentParams = { ...params };
-    streamlineData = computeStreamlines(currentParams);
-    streamlineRenderer = createStreamlineRenderer(device, canvasFormat, streamlineData);
-    arrowRenderer = createArrowRenderer(device, canvasFormat, streamlineData);
-    paths = buildPathLookup(streamlineData);
-    initParticlePhases();
+  function buildSPS() {
+    if (sps) {
+      sps.dispose();
+      sps = null;
+    }
+    if (spsMesh) {
+      spsMesh.dispose();
+      spsMesh = null;
+    }
+
+    const totalParticles = paths.length * particlesPerLine;
+    if (totalParticles === 0) return;
+
+    sps = new SolidParticleSystem('sps', scene, { updatable: true });
+    const size = totalParticles > 10000 ? 0.04 : totalParticles > 5000 ? 0.06 : totalParticles > 2000 ? 0.08 : 0.10;
+    const model = MeshBuilder.CreateSphere('pModel', { diameter: size, segments: 3 }, scene);
+    sps.addShape(model, totalParticles);
+    model.dispose();
+
+    spsMesh = sps.buildMesh();
+    spsMesh.material = particleMat;
+    spsMesh.hasVertexAlpha = true;
+
+    // Initial positions
+    sps.initParticles = () => {
+      for (let i = 0; i < totalParticles; i++) {
+        const p = sps!.particles[i];
+        const lineIdx = Math.floor(i / particlesPerLine);
+        if (lineIdx < paths.length) {
+          const t = phases[i];
+          const [x, y, z] = samplePath(paths[lineIdx], t);
+          p.position.set(x, y, z);
+          const fadeIn = Math.min(t * 8.0, 1.0);
+          const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
+          p.color = new Color4(0.122, 0.467, 0.706, fadeIn * fadeOut);
+        }
+      }
+    };
+
+    sps.updateParticle = (particle: SolidParticle) => particle;
+
+    sps.initParticles();
+    sps.setParticles();
   }
 
-  function updateParticles(dt: number) {
-    const speed = currentParams.uFreestream * 0.15; // normalized speed
-    const count = paths.length * PARTICLES_PER_LINE;
-    let written = 0;
+  initParticlePhases();
+  buildSPS();
 
-    for (let lineIdx = 0; lineIdx < paths.length; lineIdx++) {
-      const path = paths[lineIdx];
-      for (let p = 0; p < PARTICLES_PER_LINE; p++) {
-        const i = lineIdx * PARTICLES_PER_LINE + p;
-        phases[i] = (phases[i] + speed * dt) % 1.0;
+  // Animation
+  scene.onBeforeRenderObservable.add(() => {
+    const dt = engine.getDeltaTime() / 1000;
+    if (!sps || !spsMesh || paths.length === 0) return;
 
-        const t = phases[i];
-        const [x, y] = samplePath(path, t);
+    const speed = currentParams.uFreestream * 0.15;
+    const totalParticles = paths.length * particlesPerLine;
 
-        // Fade in at start, fade out at end
-        const fadeIn = Math.min(t * 8.0, 1.0);
-        const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
-        const alpha = fadeIn * fadeOut;
+    for (let i = 0; i < totalParticles; i++) {
+      phases[i] = (phases[i] + speed * dt) % 1.0;
+      const lineIdx = Math.floor(i / particlesPerLine);
+      if (lineIdx >= paths.length) continue;
 
-        instanceData[written * 3] = x;
-        instanceData[written * 3 + 1] = y;
-        instanceData[written * 3 + 2] = alpha;
-        written++;
+      const t = phases[i];
+      const [x, y, z] = samplePath(paths[lineIdx], t);
+      const p = sps.particles[i];
+      p.position.set(x, y, z);
+
+      const fadeIn = Math.min(t * 8.0, 1.0);
+      const fadeOut = Math.min((1.0 - t) * 8.0, 1.0);
+      if (!p.color) {
+        p.color = new Color4(0.122, 0.467, 0.706, fadeIn * fadeOut);
+      } else {
+        p.color.a = fadeIn * fadeOut;
       }
     }
 
-    particleRenderer.updateInstances(instanceData, written);
+    sps.setParticles();
+  });
+
+  function rebuild(params: SimParams) {
+    currentParams = { ...params };
+    // Always compute streamlines on the fixed dense grid; numStreamlines controls particle count only
+    streamlineData = computeStreamlines3D({ ...currentParams, numStreamlines: STREAMLINE_GRID * STREAMLINE_GRID });
+    paths = buildPathLookup(streamlineData);
+    createSphere();
+    initParticlePhases();
+    buildSPS();
   }
 
-  function render(targetView: GPUTextureView, dt: number) {
-    // Update particle positions
-    updateParticles(dt);
-
-    // Update sphere uniforms with current canvas size
-    sphere.updateUniforms({
-      resolution: [canvas.width, canvas.height],
-      domainMin: [-4, -3],
-      domainMax: [8, 3],
-      sphereCenter: [0, 0],
-      sphereRadius: currentParams.sphereRadius,
-    });
-
-    const encoder = device.createCommandEncoder();
-
-    const pass = encoder.beginRenderPass({
-      colorAttachments: [{
-        view: targetView,
-        loadOp: 'clear',
-        storeOp: 'store',
-        clearValue: { r: 1, g: 1, b: 1, a: 1 },
-      }],
-    });
-
-    // Draw animated particles
-    particleRenderer.render(pass);
-
-    // Draw sphere on top (white fill occludes everything inside sphere)
-    sphere.render(pass);
-
-    pass.end();
-    device.queue.submit([encoder.finish()]);
-  }
-
-  return { render, rebuild };
+  return { scene, rebuild };
 }
